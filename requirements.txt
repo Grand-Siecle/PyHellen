@@ -1,4 +1,4 @@
-git+https://github.com/hipster-philology/nlp-pie-taggers.git@master
+git+https://github.com/hipster-philology/nlp-pie-taggers.git@master #pie extended
 typing~=3.7.4.3
 pydantic~=2.10.6
 fastapi~=0.115.11
