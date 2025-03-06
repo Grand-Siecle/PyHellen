@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 from pydantic import Field, field_validator
 
 class Settings(BaseSettings):
-    title: str = "Hellen"
+    title_app: str = "Hellen"
     description: str = "REST API for accessing various NLP taggers languages models from Pie Extended"
     version: str = Field("0.0.1", description="Semantic versioning: MAJOR.MINOR.PATCH")
     openapi_url: str = "/openapi.json"
