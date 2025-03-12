@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List
+from typing import Optional, Literal, List
 from pydantic import BaseModel
 
 
@@ -14,3 +14,9 @@ class PieLanguage(str, Enum):
 
 class SupportedLanguages(BaseModel):
     languages: List[PieLanguage]
+
+class ModelStatusSchema(BaseModel):
+    language: str
+    status: Literal["loaded", "loading", "not loaded", "downloading"]
+    files: Optional[List[str]] = None
+    message: Optional[str] = None

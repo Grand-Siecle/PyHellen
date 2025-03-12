@@ -1,6 +1,8 @@
 from datetime import datetime
 from pydantic import BaseModel, Field
-from typing import Optional, Literal, Dict, Any
+from typing import Optional, Literal
+
+from app.schemas.nlp import ModelStatusSchema
 
 class HealthCheckResponse(BaseModel):
     service_name: str
@@ -16,10 +18,6 @@ class GPUStatusSchema(BaseModel):
 
 class CPUStatusSchema(BaseModel):
     workers: int = Field(gt=1)
-
-class ModelStatusSchema(BaseModel):
-    language: str
-    status: Literal["loaded", "loading", "not loaded"]
 
 class StatusSchema(BaseModel):
     gpu: GPUStatusSchema | None = None
