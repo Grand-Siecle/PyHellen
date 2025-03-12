@@ -1,22 +1,32 @@
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.utils import get_openapi
 
-
 from .routes.api import router as api_router
 from .routes.service import router as service_router
-from .settings import Settings
+from app.core.settings import Settings
+
+# settings
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.taggers_ml = {}
+    print("Application startup")
+    yield
+    print("Application shutdown")
 
 settings = Settings()
 
+# App initialization
 app = FastAPI(
     title=settings.title_app,
     description=settings.description,
     version=settings.version,
     openapi_url=settings.openapi_url,
     swagger_ui_parameters=settings.swagger_ui_parameters,
+    lifespan=lifespan,
 )
 
 # MOUNT Front

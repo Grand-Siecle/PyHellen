@@ -1,8 +1,6 @@
 import torch
 import os
 
-from app.cache import tagger_cache
-
 
 def check_gpu_availability():
     """Check GPU availability"""

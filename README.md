@@ -8,3 +8,6 @@ python 3.8 to 3.10
 ```bash
 python -m app.main
 ```
+
+## URLs
+/redoc -> api docs

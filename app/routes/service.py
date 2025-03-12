@@ -1,10 +1,10 @@
 from datetime import datetime
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
-from app.models.services import HealthCheckResponse
-from app.models.nlp import PieLanguage
-from app.utils import check_gpu_availability, get_device, get_n_workers
-from app.settings import Settings
+from app.schemas.services import HealthCheckResponse
+from app.schemas.nlp import PieLanguage
+from app.core.utils import check_gpu_availability, get_device, get_n_workers, initialize_tagger
+from app.core.settings import Settings
 
 
 router = APIRouter()
@@ -28,7 +28,7 @@ async def health_check():
 
 
 @router.get("/api/status")
-async def get_status():
+async def status_models(request: Request):
     """
     Return the status of all taggers and GPU information.
 
@@ -50,16 +50,14 @@ async def get_status():
             }
     else:
         status["cpu"] = {
-            "workers": get_n_workers() - 1,
+            "workers": get_n_workers(),
         }
 
     # Check tagger status
     for language in languages:
-        if language in taggers:
+        if language in request.app.state.taggers_ml:
             status[language] = "loaded"
         else:
-            # Try to initialize the tagger
-            tagger = initialize_tagger(language)
-            status[language] = "loaded" if tagger else "not loaded"
+            status[language] = "not loaded"
 
     return {"status": status}
