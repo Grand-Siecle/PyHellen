@@ -8,14 +8,20 @@ from fastapi.openapi.utils import get_openapi
 from .routes.api import router as api_router
 from .routes.service import router as service_router
 from app.core.settings import Settings
+from app.core.logger import logger
 
 # settings
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.taggers_ml = {}
-    print("Application startup")
-    yield
-    print("Application shutdown")
+    app.state.download_locks = {}
+    app.state.is_downloading = {}
+    logger.info("🚀 Application is starting up...")
+    try:
+        yield
+    finally:
+        app.state.taggers_ml.clear()
+        logger.info("🛑 Application is shutting down...")
 
 settings = Settings()
 

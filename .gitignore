@@ -7,3 +7,4 @@ _pycache_/
 .env
 *.pyc
 .DS_STORE
+*.log
