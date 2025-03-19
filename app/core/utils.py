@@ -1,6 +1,8 @@
 import torch
 import os
 
+from app.constants import DOWNLOAD_MODEL_PATH
+
 
 def check_gpu_availability():
     """Check GPU availability"""
@@ -16,6 +18,9 @@ def get_device():
 def get_n_workers():
     """Get numbers of cpu cores based on availability"""
     return os.cpu_count()
+
+def get_path_models(module, file):
+    return os.path.join(DOWNLOAD_MODEL_PATH, module, file)
 
 def initialize_tagger(model_name):
     if model_name not in tagger_cache:
