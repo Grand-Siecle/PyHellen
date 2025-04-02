@@ -4,66 +4,98 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.utils import get_openapi
+from fastapi.middleware.cors import CORSMiddleware
 
-from .routes.api import router as api_router
-from .routes.service import router as service_router
+from app.routes.api import router as api_router
+from app.routes.service import router as service_router
 from app.core.settings import Settings
 from app.core.logger import logger
+from app.core.model_manager import model_manager
 
-# settings
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    Lifecycle manager for the Hellen FastAPI application.
+    """
+    # Initialize at startup
+    logger.info("🚀 Application is starting up...")
+
+    # Store model manager in app state for access from route handlers
+    app.state.model_manager = model_manager
+
+    # Backwards compatibility
     app.state.taggers_ml = {}
     app.state.download_locks = {}
     app.state.is_downloading = {}
-    logger.info("🚀 Application is starting up...")
+
     try:
         yield
     finally:
-        app.state.taggers_ml.clear()
+        # Cleanup at shutdown
         logger.info("🛑 Application is shutting down...")
-
-settings = Settings()
-
-# App initialization
-app = FastAPI(
-    title=settings.title_app,
-    description=settings.description,
-    version=settings.version,
-    openapi_url=settings.openapi_url,
-    swagger_ui_parameters=settings.swagger_ui_parameters,
-    lifespan=lifespan,
-)
-
-# MOUNT Front
-app.mount("/static", StaticFiles(directory="app/statics"), name="static")
-
-# ROUTERS
-app.include_router(api_router, prefix="/api", tags=["API Natural Language Processing"])
-app.include_router(service_router, prefix="/service", tags=["Service Informations"])
+        # Clear models from memory
+        model_manager.models.clear()
 
 
-def custom_openapi():
-    if app.openapi_schema:
-        return app.openapi_schema
-    openapi_schema = get_openapi(
-        title=settings.title_app + " API",
-        version=settings.version,
-        summary=f"OpenAPI schema for {settings.title_app} API",
+def create_application() -> FastAPI:
+    """
+    Create and configure the FastAPI application.
+    """
+    settings = Settings()
+
+    app = FastAPI(
+        title=settings.title_app,
         description=settings.description,
-        routes=app.routes,
+        version=settings.version,
+        openapi_url=settings.openapi_url,
+        swagger_ui_parameters=settings.swagger_ui_parameters,
+        lifespan=lifespan,
     )
-    openapi_schema["info"]["x-logo"] = {
-        "url": "/static/logo.png"
-    }
-    app.openapi_schema = openapi_schema
-    return app.openapi_schema
 
-app.openapi = custom_openapi
+    # CORS
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
+    # Static files
+    app.mount("/static", StaticFiles(directory="app/statics"), name="static")
+
+    # Routers
+    app.include_router(api_router, prefix="/api", tags=["API Natural Language Processing"])
+    app.include_router(service_router, prefix="/service", tags=["Service Information"])
+
+    # Custom OpenAPI schema
+    def custom_openapi():
+        if app.openapi_schema:
+            return app.openapi_schema
+        openapi_schema = get_openapi(
+            title=settings.title_app + " API",
+            version=settings.version,
+            summary=f"OpenAPI schema for {settings.title_app} API",
+            description=settings.description,
+            routes=app.routes,
+        )
+        openapi_schema["info"]["x-logo"] = {
+            "url": "/static/logo.png"
+        }
+        app.openapi_schema = openapi_schema
+        return app.openapi_schema
+
+    app.openapi = custom_openapi
+
+    return app
+
+
+app = create_application()
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         app,
         host="0.0.0.0",
