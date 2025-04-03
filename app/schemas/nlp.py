@@ -20,11 +20,3 @@ class ModelStatusSchema(BaseModel):
     status: Literal["loaded", "loading", "not loaded", "downloading"]
     files: Optional[List[str]] = None
     message: Optional[str] = None
-
-class TextInput(BaseModel):
-    text: str
-    lower: bool = False
-
-class BatchTextInput(BaseModel):
-    texts: List[str]
-    lower: bool = False

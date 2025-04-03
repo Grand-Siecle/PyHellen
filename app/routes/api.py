@@ -1,11 +1,23 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from typing import List, Dict, Optional
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
-from app.schemas.nlp import SupportedLanguages, PieLanguage, TextInput, BatchTextInput
+from app.schemas.nlp import SupportedLanguages, PieLanguage
 from app.core.model_manager import model_manager
 from app.core.logger import logger
 
 router = APIRouter()
+
+
+class TextInput(BaseModel):
+    text: str
+    lower: bool = False
+
+
+class BatchTextInput(BaseModel):
+    texts: List[str]
+    lower: bool = False
 
 
 @router.get("/languages", response_model=SupportedLanguages)
