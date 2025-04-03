@@ -21,7 +21,6 @@ class ModelManager:
         self.iterator_processors: Dict[str, Callable[[], Tuple]] = {}
         self.download_locks: Dict[str, asyncio.Lock] = {}
         self.is_downloading: Dict[str, bool] = {}
-        self.batch_size = 256
         logger.info(f"ModelManager initialized with device: {self.device}")
 
     @property
