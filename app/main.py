@@ -11,6 +11,7 @@ from app.routes.service import router as service_router
 from app.core.settings import Settings
 from app.core.logger import logger
 from app.core.model_manager import model_manager
+from app.core.environment import PIE_EXTENDED_DOWNLOADS
 
 
 @asynccontextmanager
@@ -20,6 +21,7 @@ async def lifespan(app: FastAPI):
     """
     # Initialize at startup
     logger.info("🚀 Application is starting up...")
+    logger.info(f"Using PIE_EXTENDED_DOWNLOADS: {PIE_EXTENDED_DOWNLOADS}")
 
     # Store model manager in app state for access from route handlers
     app.state.model_manager = model_manager

@@ -1,6 +1,7 @@
 from typing import Dict, Optional, List, Union, Callable, Tuple
 import asyncio
 import importlib
+import os
 import requests
 from pie_extended.cli.utils import get_model, get_tagger
 from fastapi import HTTPException
@@ -53,8 +54,26 @@ class ModelManager:
         Check if a model is available for download.
         """
         try:
-            return get_model(model_name) is not None
+            return get_model(model_name)
         except ImportError:
+            return False
+
+    def _check_model_files_exist(self, module: str, model_path: str) -> bool:
+        """
+        Check if all required model files exist at the specified path.
+        """
+        try:
+            module_info = get_model(module)
+            if module_info and hasattr(module_info, 'DOWNLOADS'):
+                for file in module_info.DOWNLOADS:
+                    file_path = os.path.join(model_path, file.name)
+                    if not os.path.exists(file_path):
+                        logger.warning(f"Model file {file_path} not found")
+                        return False
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error checking model files for '{module}': {str(e)}")
             return False
 
     def get_all_models_status(self) -> Dict[str, ModelStatusSchema]:
@@ -168,20 +187,29 @@ class ModelManager:
 
         # Try to load the model
         try:
-            # First check if we need to download the model
-            if not self._is_model_available(module):
-                logger.warning(f"Model '{module}' not available. Attempting to download...")
+            # Get module metadata
+            module_info = self._is_model_available(module)
+
+            if module_info is None:
+                logger.error(f"❌ Model '{module}' not available!")
+                raise RuntimeError(f"Model '{module}' not available!")
+
+            model_path = get_path_models(module, "")
+
+            # Check if model neet to be downloading
+            if not self._check_model_files_exist(module, model_path):
+                logger.warning(f"⚠️ Model files for '{module}' not found at {model_path}. Attempting to download...")
                 success = await self.download_model(module)
                 if not success:
                     raise RuntimeError(f"Failed to download model '{module}'")
 
             # Load the tagger using pie_extended
-            logger.info(f"Loading tagger for model '{module}'...")
+            logger.info(f"☕ Loading tagger for model '{module}'...")
             tagger = get_tagger(
                 module,
                 batch_size=self.batch_size,
                 device=self.device,
-                model_path=None  # Use default path
+                model_path=None
             )
 
             if not tagger:
@@ -195,11 +223,11 @@ class ModelManager:
 
                 if hasattr(module_imports, 'get_iterator_and_processor'):
                     self.iterator_processors[module] = module_imports.get_iterator_and_processor
-                    logger.info(f"Successfully loaded iterator and processor for '{module}'")
+                    logger.info(f"✅ Successfully loaded iterator and processor for '{module}'")
                 else:
-                    logger.warning(f"No get_iterator_and_processor found for '{module}', using default processing")
+                    logger.warning(f"⚠️ No get_iterator_and_processor found for '{module}', using default processing")
             except ImportError as e:
-                logger.warning(f"Could not import iterator and processor for '{module}': {e}")
+                logger.warning(f"⚠️ Could not import iterator and processor for '{module}': {e}")
                 self.iterator_processors[module] = None
 
             # Store the loaded tagger
@@ -223,7 +251,7 @@ class ModelManager:
                 iterator, processor = self.iterator_processors[model_name]()
                 return tagger.tag_str(text, iterator=iterator, processor=processor)
             except Exception as e:
-                logger.error(f"Error using custom iterator/processor for '{model_name}': {e}")
+                logger.error(f"❌ Error using custom iterator/processor for '{model_name}': {e}")
                 # Fall back to default tagging if custom iterator/processor fails
                 return tagger.tag(text)
         else:

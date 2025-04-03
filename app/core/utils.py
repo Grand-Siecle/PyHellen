@@ -1,7 +1,7 @@
 import torch
 import os
 
-from app.constants import DOWNLOAD_MODEL_PATH
+from app.core.environment import PIE_EXTENDED_DOWNLOADS
 
 
 def check_gpu_availability():
@@ -20,4 +20,4 @@ def get_n_workers():
     return os.cpu_count()
 
 def get_path_models(module, file):
-    return os.path.join(DOWNLOAD_MODEL_PATH, module, file)
+    return os.path.join(PIE_EXTENDED_DOWNLOADS, module, file)
