@@ -21,12 +21,3 @@ def get_n_workers():
 
 def get_path_models(module, file):
     return os.path.join(DOWNLOAD_MODEL_PATH, module, file)
-
-def initialize_tagger(model_name):
-    if model_name not in tagger_cache:
-        try:
-            tag[model_name] = get_tagger(model_name, batch_size=8, device=device)
-        except Exception as e:
-            print(f"Error initializing {model_name} tagger: {str(e)}")
-            return None
-    return taggers[model_name]
