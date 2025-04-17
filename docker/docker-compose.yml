@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  # CPU version (default)
+  pyhellen:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: pyhellen:latest
+    container_name: pyhellen-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../app:/app/app
+      - model_data:/data/models
+    environment:
+      - PIE_EXTENDED_DOWNLOADS=/data/models
+      - PYTHONPATH=/app
+      - USE_CUDA=0
+    restart: unless-stopped
+
+  # GPU version (requires Nvidia Container Toolkit)
+  pyhellen-gpu:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.gpu
+    image: pyhellen:gpu
+    container_name: pyhellen-api-gpu
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../app:/app/app
+      - model_data:/data/models
+    environment:
+      - PIE_EXTENDED_DOWNLOADS=/data/models
+      - PYTHONPATH=/app
+      - USE_CUDA=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  model_data:
+    driver: local
