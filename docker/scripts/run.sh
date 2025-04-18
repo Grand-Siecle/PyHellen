@@ -21,9 +21,8 @@ fi
 # Check for NVIDIA GPU
 echo -e "${BLUE}Checking for NVIDIA GPU...${NC}"
 echo "PATH is: $PATH"
-if command -v nvidia-smi &> /dev/null; then
-    echo -e "HELLO WORLD"
-    nvidia-smi &> /dev/null
+if command -v nvidia-smi 2> /dev/null; then
+    nvidia-smi 2> /dev/null
     if [ $? -eq 0 ]; then
         HAS_GPU=1
         GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n 1)
@@ -40,9 +39,11 @@ fi
 # Check for nvidia-docker
 if [ $HAS_GPU -eq 1 ]; then
     echo -e "${BLUE}Checking for NVIDIA Docker support...${NC}"
-    if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q "nvidia"; then
+    if command -v nvidia-container-cli 2>/dev/null;  then
+        version=$(dpkg -l | grep nvidia-container-toolkit | awk '{print $3}')
         HAS_NVIDIA_DOCKER=1
         echo -e "${GREEN}✓ NVIDIA Docker support detected${NC}"
+        echo "nvidia-container-toolkit is installed. Version: $version"
     else
         HAS_NVIDIA_DOCKER=0
         echo -e "${YELLOW}✗ NVIDIA Docker support not detected${NC}"
