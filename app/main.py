@@ -18,7 +18,13 @@ from app.core.environment import PIE_EXTENDED_DOWNLOADS
 async def lifespan(app: FastAPI):
     """
     Lifecycle manager for the Hellen FastAPI application.
+
+    Handles:
+    - Startup: Initializes model manager, preloads configured models
+    - Shutdown: Gracefully shuts down model manager and clears resources
     """
+    from app.core.settings import settings
+
     # Initialize at startup
     logger.info("🚀 Application is starting up...")
     logger.info(f"Using PIE_EXTENDED_DOWNLOADS: {PIE_EXTENDED_DOWNLOADS}")
@@ -31,14 +37,30 @@ async def lifespan(app: FastAPI):
     app.state.download_locks = {}
     app.state.is_downloading = {}
 
+    # Preload configured models
+    if settings.preload_models:
+        logger.info(f"Preloading models: {settings.preload_models}")
+        for model_name in settings.preload_models:
+            try:
+                await model_manager.get_or_load_model(model_name)
+                logger.info(f"✅ Preloaded model: {model_name}")
+            except Exception as e:
+                logger.error(f"❌ Failed to preload model '{model_name}': {e}")
+
     try:
         yield
     finally:
         # Cleanup at shutdown
         logger.info("🛑 Application is shutting down...")
-        # Clear models from memory
+        # Clear models from memory (don't shutdown executor to avoid issues with pending requests)
         model_manager.taggers.clear()
         model_manager.iterator_processors.clear()
+        # Close HTTP client if open
+        if model_manager._http_client and not model_manager._http_client.is_closed:
+            await model_manager._http_client.aclose()
+        # Log final metrics
+        if model_manager._metrics:
+            logger.info(f"Final metrics: {model_manager._metrics.total_requests} requests, {model_manager._metrics.total_errors} errors")
 
 
 def create_application() -> FastAPI:
