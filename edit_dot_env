@@ -79,6 +79,18 @@ DOWNLOAD_MAX_RETRIES=3
 ENABLE_METRICS=true
 
 # ===================
+# Logging
+# ===================
+# Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_LEVEL=INFO
+
+# Log format: 'json' for production (structured), 'text' for development, 'auto' to detect
+LOG_FORMAT=auto
+
+# Optional: Log file path (in addition to stdout). Leave empty for stdout only.
+LOG_FILE=""
+
+# ===================
 # SSL/TLS (Optional)
 # ===================
 # Path to SSL key file (for HTTPS)
