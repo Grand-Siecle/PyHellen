@@ -94,12 +94,15 @@ class GlobalMetrics:
     def to_dict(self) -> Dict[str, Any]:
         """Convert all metrics to a dictionary for JSON serialization."""
         uptime = (datetime.now() - self.started_at).total_seconds()
+        # Calculate requests per minute, avoiding division issues with very small uptimes
+        uptime_minutes = uptime / 60
+        requests_per_minute = round(self.total_requests / uptime_minutes, 2) if uptime_minutes >= 0.01 else 0.0
         return {
             "started_at": self.started_at.isoformat(),
             "uptime_seconds": round(uptime, 2),
             "total_requests": self.total_requests,
             "total_errors": self.total_errors,
-            "requests_per_minute": round(self.total_requests / (uptime / 60), 2) if uptime > 0 else 0,
+            "requests_per_minute": requests_per_minute,
             "models": {name: m.to_dict() for name, m in self.models.items()}
         }
 
@@ -119,7 +122,9 @@ class ModelManager:
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=get_n_workers())
         self._processing_semaphore = asyncio.Semaphore(settings.max_concurrent_processing)
         self._http_client: Optional[httpx.AsyncClient] = None
+        self._http_client_lock = asyncio.Lock()
         self._metrics = GlobalMetrics() if settings.enable_metrics else None
+        self._metrics_lock = asyncio.Lock()
         self._shutdown_event = asyncio.Event()
         logger.info(f"ModelManager initialized with device: {self.device}")
 
@@ -150,6 +155,58 @@ class ModelManager:
             return None
         return self._metrics.to_dict()
 
+    def _update_metrics_sync(
+        self,
+        model_name: str,
+        *,
+        load_time_ms: Optional[float] = None,
+        process_time_ms: Optional[float] = None,
+        download_time_ms: Optional[float] = None,
+        download_bytes: Optional[int] = None,
+        error: bool = False,
+        increment_requests: bool = False
+    ) -> None:
+        """
+        Thread-safe synchronous metrics update using a threading lock.
+
+        This method is safe to call from sync code running in the thread pool.
+        """
+        if self._metrics is None:
+            return
+
+        import threading
+        if not hasattr(self, '_metrics_thread_lock'):
+            self._metrics_thread_lock = threading.Lock()
+
+        with self._metrics_thread_lock:
+            metrics = self._metrics.get_model_metrics(model_name)
+            now = datetime.now()
+
+            if load_time_ms is not None:
+                metrics.load_count += 1
+                metrics.load_time_total_ms += load_time_ms
+                metrics.last_loaded_at = now
+                metrics.last_used_at = now
+
+            if process_time_ms is not None:
+                metrics.process_count += 1
+                metrics.process_time_total_ms += process_time_ms
+                metrics.last_used_at = now
+
+            if download_time_ms is not None:
+                metrics.download_count += 1
+                metrics.download_time_total_ms += download_time_ms
+
+            if download_bytes is not None:
+                metrics.download_size_bytes += download_bytes
+
+            if error:
+                metrics.error_count += 1
+                self._metrics.total_errors += 1
+
+            if increment_requests:
+                self._metrics.total_requests += 1
+
     async def _get_http_client(self) -> httpx.AsyncClient:
         """
         Get or create the async HTTP client for downloads.
@@ -158,10 +215,13 @@ class ModelManager:
             An active httpx.AsyncClient instance.
         """
         if self._http_client is None or self._http_client.is_closed:
-            self._http_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(settings.download_timeout_seconds),
-                follow_redirects=True
-            )
+            async with self._http_client_lock:
+                # Double-check after acquiring lock
+                if self._http_client is None or self._http_client.is_closed:
+                    self._http_client = httpx.AsyncClient(
+                        timeout=httpx.Timeout(settings.download_timeout_seconds),
+                        follow_redirects=True
+                    )
         return self._http_client
 
     def get_model_status(self, model_name: str) -> str:
@@ -308,8 +368,7 @@ class ModelManager:
         if os.path.exists(filename):
             os.remove(filename)
 
-        if self._metrics:
-            self._metrics.get_model_metrics(model_name).error_count += 1
+        self._update_metrics_sync(model_name, error=True)
 
         raise RuntimeError(f"Failed to download {url} after {settings.download_max_retries} attempts: {last_error}")
 
@@ -363,20 +422,18 @@ class ModelManager:
                 download_time = (time.time() - start_time) * 1000
 
                 # Update metrics
-                if self._metrics:
-                    metrics = self._metrics.get_model_metrics(module)
-                    metrics.download_count += 1
-                    metrics.download_time_total_ms += download_time
-                    metrics.download_size_bytes += total_bytes
+                self._update_metrics_sync(
+                    module,
+                    download_time_ms=download_time,
+                    download_bytes=total_bytes
+                )
 
                 logger.info(f"✅ Download completed: {', '.join(downloaded_files)} ({download_time:.0f}ms)")
                 return True
 
             except Exception as e:
                 logger.error(f"❌ Error downloading module '{module}': {e}")
-                if self._metrics:
-                    self._metrics.get_model_metrics(module).error_count += 1
-                    self._metrics.total_errors += 1
+                self._update_metrics_sync(module, error=True)
                 return False
 
             finally:
@@ -398,9 +455,13 @@ class ModelManager:
         """
         # Check if already loaded
         if module in self.taggers and self.taggers[module]:
-            # Update last used timestamp
+            # Update last used timestamp (thread-safe)
             if self._metrics:
-                self._metrics.get_model_metrics(module).last_used_at = datetime.now()
+                import threading
+                if not hasattr(self, '_metrics_thread_lock'):
+                    self._metrics_thread_lock = threading.Lock()
+                with self._metrics_thread_lock:
+                    self._metrics.get_model_metrics(module).last_used_at = datetime.now()
             return self.taggers[module]
 
         # Wait if currently downloading
@@ -461,21 +522,14 @@ class ModelManager:
 
             # Update metrics
             load_time = (time.time() - start_time) * 1000
-            if self._metrics:
-                metrics = self._metrics.get_model_metrics(module)
-                metrics.load_count += 1
-                metrics.load_time_total_ms += load_time
-                metrics.last_loaded_at = datetime.now()
-                metrics.last_used_at = datetime.now()
+            self._update_metrics_sync(module, load_time_ms=load_time)
 
             logger.info(f"✅ Model '{module}' loaded in {load_time:.0f}ms")
             return tagger
 
         except Exception as e:
             logger.error(f"❌ Error loading model '{module}': {str(e)}")
-            if self._metrics:
-                self._metrics.get_model_metrics(module).error_count += 1
-                self._metrics.total_errors += 1
+            self._update_metrics_sync(module, error=True)
             raise RuntimeError(f"Failed to load model '{module}': {str(e)}")
 
     def process_text(self, model_name: str, tagger, text: str, lower: bool = False) -> List[Dict]:
@@ -510,21 +564,18 @@ class ModelManager:
                 # Use default tagging method if no custom iterator/processor is available
                 result = tagger.tag(text)
 
-            # Update metrics
-            if self._metrics:
-                process_time = (time.time() - start_time) * 1000
-                metrics = self._metrics.get_model_metrics(model_name)
-                metrics.process_count += 1
-                metrics.process_time_total_ms += process_time
-                metrics.last_used_at = datetime.now()
-                self._metrics.total_requests += 1
+            # Update metrics (thread-safe)
+            process_time = (time.time() - start_time) * 1000
+            self._update_metrics_sync(
+                model_name,
+                process_time_ms=process_time,
+                increment_requests=True
+            )
 
             return result
 
         except Exception as e:
-            if self._metrics:
-                self._metrics.get_model_metrics(model_name).error_count += 1
-                self._metrics.total_errors += 1
+            self._update_metrics_sync(model_name, error=True)
             raise
 
     async def stream_process(self, model_name: str, texts: List[str], lower: bool = False):
@@ -776,12 +827,17 @@ class ModelManager:
             logger.error(f"❌ Error unloading model '{model_name}': {e}")
             return False
 
-    async def shutdown(self):
+    async def shutdown(self, shutdown_executor: bool = False):
         """
         Gracefully shutdown the ModelManager.
 
-        Closes HTTP client, shuts down thread pool executor,
+        Closes HTTP client, optionally shuts down thread pool executor,
         clears all loaded models, and logs final metrics.
+
+        Args:
+            shutdown_executor: If True, shutdown the thread pool executor.
+                              Set to False when called during app lifespan to avoid
+                              blocking pending requests.
         """
         logger.info("🛑 Shutting down ModelManager...")
         self._shutdown_event.set()
@@ -791,9 +847,10 @@ class ModelManager:
             await self._http_client.aclose()
             logger.info("HTTP client closed")
 
-        # Shutdown executor (wait for pending tasks)
-        self._executor.shutdown(wait=True, cancel_futures=False)
-        logger.info("Thread pool executor shut down")
+        # Optionally shutdown executor (wait for pending tasks)
+        if shutdown_executor:
+            self._executor.shutdown(wait=True, cancel_futures=False)
+            logger.info("Thread pool executor shut down")
 
         # Clear models
         self.taggers.clear()
