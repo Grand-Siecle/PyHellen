@@ -9,6 +9,7 @@ __pycache__/
 *.pyc
 .DS_STORE
 *.log
+.coverage
 
 # Security - NEVER commit these files
 tokens.db
