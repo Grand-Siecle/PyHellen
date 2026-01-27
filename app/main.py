@@ -37,7 +37,8 @@ async def lifespan(app: FastAPI):
         # Cleanup at shutdown
         logger.info("🛑 Application is shutting down...")
         # Clear models from memory
-        model_manager.models.clear()
+        model_manager.taggers.clear()
+        model_manager.iterator_processors.clear()
 
 
 def create_application() -> FastAPI:
