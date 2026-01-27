@@ -155,12 +155,13 @@ class TestCacheEntry:
 
     def test_cache_entry_creation(self):
         """Test creating a cache entry."""
-        entry = CacheEntry(value="test", expires_at=time.time() + 3600)
+        entry = CacheEntry(value="test", expires_at=time.time() + 3600, model="test_model")
         assert entry.value == "test"
+        assert entry.model == "test_model"
         assert entry.hits == 0
 
     def test_cache_entry_hits(self):
         """Test incrementing hits."""
-        entry = CacheEntry(value="test", expires_at=time.time() + 3600)
+        entry = CacheEntry(value="test", expires_at=time.time() + 3600, model="test_model")
         entry.hits += 1
         assert entry.hits == 1

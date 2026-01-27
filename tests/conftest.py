@@ -37,7 +37,7 @@ _init_test_db()
 
 from app.main import app, create_application
 from app.core.model_manager import ModelManager
-from app.core.cache import LRUCache
+from app.core.cache import LRUCache, HybridCache
 
 
 @pytest.fixture(scope="session")
@@ -46,6 +46,13 @@ def event_loop():
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
+
+
+@pytest.fixture(autouse=True)
+def reset_singletons_after_test():
+    """Reset database singletons after each test for isolation."""
+    yield
+    _reset_db_singletons()
 
 
 @pytest.fixture
@@ -78,8 +85,8 @@ def mock_model_manager():
 
 @pytest.fixture
 def cache():
-    """Create a fresh cache instance for testing."""
-    return LRUCache(max_size=100, ttl_seconds=60)
+    """Create a fresh cache instance for testing (without persistence)."""
+    return HybridCache(max_size=100, ttl_seconds=60, persist=False)
 
 
 @pytest.fixture
