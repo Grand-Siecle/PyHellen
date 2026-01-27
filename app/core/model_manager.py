@@ -1,12 +1,16 @@
-from typing import Dict, Optional, List, Union, Callable, Tuple
+from typing import Dict, Optional, List, Union, Callable, Tuple, AsyncIterator, Any
 import asyncio
+import concurrent.futures
+import functools
 import importlib
+import json
 import os
+import time
 import requests
 from pie_extended.cli.utils import get_model, get_tagger
 from fastapi import HTTPException
 
-from app.core.utils import get_path_models, get_device
+from app.core.utils import get_path_models, get_device, get_n_workers
 from app.core.logger import logger
 from app.schemas.nlp import PieLanguage, ModelStatusSchema
 
@@ -22,6 +26,9 @@ class ModelManager:
         self.iterator_processors: Dict[str, Callable[[], Tuple]] = {}
         self.download_locks: Dict[str, asyncio.Lock] = {}
         self.is_downloading: Dict[str, bool] = {}
+        self.models: Dict[str, Any] = {}  # For backwards compatibility
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=get_n_workers())
+        self._processing_semaphore = asyncio.Semaphore(10)  # Limit concurrent processing
         logger.info(f"ModelManager initialized with device: {self.device}")
 
     @property
@@ -269,6 +276,215 @@ class ModelManager:
         for text in texts:
             result = self.process_text(model_name, tagger, text, lower)
             yield f"{result}\n"
+
+    async def process_text_async(
+        self,
+        model_name: str,
+        tagger,
+        text: str,
+        lower: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Process text asynchronously using thread pool to avoid blocking.
+        """
+        loop = asyncio.get_event_loop()
+        async with self._processing_semaphore:
+            result = await loop.run_in_executor(
+                self._executor,
+                functools.partial(self.process_text, model_name, tagger, text, lower)
+            )
+            return result
+
+    async def batch_process_concurrent(
+        self,
+        model_name: str,
+        texts: List[str],
+        lower: bool = False,
+        max_concurrent: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Process multiple texts concurrently for better performance.
+
+        Args:
+            model_name: Name of the model to use
+            texts: List of texts to process
+            lower: Whether to lowercase the text
+            max_concurrent: Maximum number of concurrent processing tasks
+
+        Returns:
+            List of results in the same order as input texts
+        """
+        from app.core.cache import cache
+
+        tagger = await self.get_or_load_model(model_name)
+        if not tagger:
+            raise HTTPException(status_code=500, detail=f"Failed to load tagger for '{model_name}'")
+
+        results = [None] * len(texts)
+        tasks_to_process = []
+
+        # Check cache first
+        for idx, text in enumerate(texts):
+            cached = await cache.get(model_name, text, lower)
+            if cached is not None:
+                results[idx] = cached
+            else:
+                tasks_to_process.append((idx, text))
+
+        # Process uncached texts concurrently
+        if tasks_to_process:
+            semaphore = asyncio.Semaphore(max_concurrent)
+
+            async def process_with_semaphore(idx: int, text: str):
+                async with semaphore:
+                    result = await self.process_text_async(model_name, tagger, text, lower)
+                    await cache.set(model_name, text, lower, result)
+                    return idx, result
+
+            tasks = [
+                process_with_semaphore(idx, text)
+                for idx, text in tasks_to_process
+            ]
+
+            completed = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for item in completed:
+                if isinstance(item, Exception):
+                    logger.error(f"Error in batch processing: {item}")
+                    raise item
+                idx, result = item
+                results[idx] = result
+
+        return results
+
+    async def stream_process_ndjson(
+        self,
+        model_name: str,
+        texts: List[str],
+        lower: bool = False
+    ) -> AsyncIterator[str]:
+        """
+        Stream process texts and yield results as NDJSON (Newline Delimited JSON).
+        Each line is a valid JSON object.
+        """
+        from app.core.cache import cache
+
+        tagger = await self.get_or_load_model(model_name)
+        if not tagger:
+            raise HTTPException(status_code=500, detail=f"Failed to load tagger for '{model_name}'")
+
+        for idx, text in enumerate(texts):
+            start_time = time.time()
+
+            # Check cache
+            cached = await cache.get(model_name, text, lower)
+            if cached is not None:
+                result = cached
+                from_cache = True
+            else:
+                result = await self.process_text_async(model_name, tagger, text, lower)
+                await cache.set(model_name, text, lower, result)
+                from_cache = False
+
+            processing_time = time.time() - start_time
+
+            output = {
+                "index": idx,
+                "text": text[:100] + "..." if len(text) > 100 else text,
+                "result": result,
+                "processing_time_ms": round(processing_time * 1000, 2),
+                "from_cache": from_cache
+            }
+            yield json.dumps(output) + "\n"
+
+    async def stream_process_sse(
+        self,
+        model_name: str,
+        texts: List[str],
+        lower: bool = False
+    ) -> AsyncIterator[str]:
+        """
+        Stream process texts using Server-Sent Events (SSE) format.
+        """
+        from app.core.cache import cache
+
+        tagger = await self.get_or_load_model(model_name)
+        if not tagger:
+            raise HTTPException(status_code=500, detail=f"Failed to load tagger for '{model_name}'")
+
+        total = len(texts)
+
+        # Send initial event
+        yield f"event: start\ndata: {json.dumps({'total': total, 'model': model_name})}\n\n"
+
+        for idx, text in enumerate(texts):
+            start_time = time.time()
+
+            # Check cache
+            cached = await cache.get(model_name, text, lower)
+            if cached is not None:
+                result = cached
+                from_cache = True
+            else:
+                result = await self.process_text_async(model_name, tagger, text, lower)
+                await cache.set(model_name, text, lower, result)
+                from_cache = False
+
+            processing_time = time.time() - start_time
+
+            data = {
+                "index": idx,
+                "progress": f"{idx + 1}/{total}",
+                "result": result,
+                "processing_time_ms": round(processing_time * 1000, 2),
+                "from_cache": from_cache
+            }
+            yield f"event: result\ndata: {json.dumps(data)}\n\n"
+
+        # Send completion event
+        yield f"event: complete\ndata: {json.dumps({'total_processed': total})}\n\n"
+
+    def get_model_info(self, model_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Get detailed information about a model.
+        """
+        try:
+            module_info = get_model(model_name)
+            if not module_info:
+                return None
+
+            info = {
+                "name": model_name,
+                "status": self.get_model_status(model_name),
+                "device": self.device,
+                "batch_size": self.batch_size,
+                "files": [],
+                "total_size_mb": 0
+            }
+
+            if hasattr(module_info, 'DOWNLOADS'):
+                for file in module_info.DOWNLOADS:
+                    file_info = {"name": file.name, "url": file.url}
+                    file_path = get_path_models(model_name, file.name)
+                    if os.path.exists(file_path):
+                        size_mb = os.path.getsize(file_path) / (1024 * 1024)
+                        file_info["size_mb"] = round(size_mb, 2)
+                        file_info["downloaded"] = True
+                        info["total_size_mb"] += size_mb
+                    else:
+                        file_info["downloaded"] = False
+                    info["files"].append(file_info)
+
+                info["total_size_mb"] = round(info["total_size_mb"], 2)
+
+            # Check if iterator/processor is available
+            info["has_custom_processor"] = model_name in self.iterator_processors
+
+            return info
+
+        except Exception as e:
+            logger.error(f"Error getting model info for '{model_name}': {e}")
+            return None
 
 
 model_manager = ModelManager()
