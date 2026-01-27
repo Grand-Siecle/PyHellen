@@ -16,7 +16,7 @@ from fastapi import HTTPException
 from app.core.utils import get_path_models, get_device, get_n_workers
 from app.core.logger import logger
 from app.core.settings import settings
-from app.schemas.nlp import PieLanguage, ModelStatusSchema
+from app.schemas.nlp import ModelStatusSchema
 
 
 @dataclass
@@ -155,6 +155,17 @@ class ModelManager:
             return None
         return self._metrics.to_dict()
 
+    def _get_metrics_repo(self):
+        """Lazy initialization of metrics repository."""
+        if not hasattr(self, '_metrics_repo') or self._metrics_repo is None:
+            try:
+                from app.core.database import MetricsRepository
+                self._metrics_repo = MetricsRepository()
+            except Exception as e:
+                logger.warning(f"Could not initialize metrics persistence: {e}")
+                self._metrics_repo = None
+        return self._metrics_repo
+
     def _update_metrics_sync(
         self,
         model_name: str,
@@ -170,6 +181,7 @@ class ModelManager:
         Thread-safe synchronous metrics update using a threading lock.
 
         This method is safe to call from sync code running in the thread pool.
+        Updates both in-memory metrics and persists to database.
         """
         if self._metrics is None:
             return
@@ -206,6 +218,21 @@ class ModelManager:
 
             if increment_requests:
                 self._metrics.total_requests += 1
+
+        # Persist to database (fire and forget, errors logged but ignored)
+        try:
+            repo = self._get_metrics_repo()
+            if repo:
+                if load_time_ms is not None:
+                    repo.update_load_metrics(model_name, load_time_ms)
+                if process_time_ms is not None:
+                    repo.update_process_metrics(model_name, process_time_ms)
+                if download_time_ms is not None and download_bytes is not None:
+                    repo.update_download_metrics(model_name, download_time_ms, download_bytes)
+                if error:
+                    repo.increment_error(model_name)
+        except Exception as e:
+            logger.warning(f"Failed to persist metrics for {model_name}: {e}")
 
     async def _get_http_client(self) -> httpx.AsyncClient:
         """
@@ -263,15 +290,20 @@ class ModelManager:
 
     def get_all_models_status(self) -> Dict[str, ModelStatusSchema]:
         """
-        Get status information for all supported models.
+        Get status information for all supported models from the database.
         """
+        from app.core.database import get_db_manager, ModelRepository
+
+        model_repo = ModelRepository()
+        models = model_repo.get_all(include_inactive=False)
+
         models_status = {}
-        for language in PieLanguage:
-            status = self.get_model_status(language.name)
-            models_status[language.name] = ModelStatusSchema(
-                language=language.value,
+        for model in models:
+            status = self.get_model_status(model.code)
+            models_status[model.code] = ModelStatusSchema(
+                language=model.name,
                 status=status,
-                files=self._get_model_files(language.name) if status in ["loaded", "not loaded"] else None
+                files=self._get_model_files(model.code) if status in ["loaded", "not loaded"] else None
             )
         return models_status
 
