@@ -229,15 +229,43 @@ async def batch_process(
     ```
     """
     start_time = time.time()
+    cache_hits = 0
 
     try:
         if concurrent:
-            # Use optimized concurrent processing
-            results = await model_manager.batch_process_concurrent(
-                model,
-                batch_data.texts,
-                batch_data.lower
-            )
+            # Check cache first to count hits for this request
+            tagger = await model_manager.get_or_load_model(model)
+            if not tagger:
+                raise HTTPException(status_code=500, detail=f"Failed to load tagger for model '{model}'")
+
+            results = [None] * len(batch_data.texts)
+            texts_to_process = []
+
+            for idx, text in enumerate(batch_data.texts):
+                cached = await cache.get(model, text, batch_data.lower)
+                if cached is not None:
+                    results[idx] = cached
+                    cache_hits += 1
+                else:
+                    texts_to_process.append((idx, text))
+
+            # Process uncached texts concurrently
+            if texts_to_process:
+                import asyncio
+
+                async def process_one(idx: int, text: str):
+                    result = await model_manager.process_text_async(model, tagger, text, batch_data.lower)
+                    await cache.set(model, text, batch_data.lower, result)
+                    return idx, result
+
+                tasks = [process_one(idx, text) for idx, text in texts_to_process]
+                completed = await asyncio.gather(*tasks, return_exceptions=True)
+
+                for item in completed:
+                    if isinstance(item, Exception):
+                        raise item
+                    idx, result = item
+                    results[idx] = result
         else:
             # Fall back to sequential processing
             tagger = await model_manager.get_or_load_model(model)
@@ -250,16 +278,13 @@ async def batch_process(
                 cached = await cache.get(model, text, batch_data.lower)
                 if cached is not None:
                     results.append(cached)
+                    cache_hits += 1
                 else:
                     result = model_manager.process_text(model, tagger, text, batch_data.lower)
                     await cache.set(model, text, batch_data.lower, result)
                     results.append(result)
 
         processing_time = (time.time() - start_time) * 1000
-
-        # Count cache hits from stats
-        cache_stats = cache.stats
-        cache_hits = cache_stats.get("hits", 0)
 
         return BatchResponse(
             results=results,
