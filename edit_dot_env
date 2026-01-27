@@ -1,3 +1,88 @@
-# Edit this file and save as ".env" for use.
+# ===========================================
+# PyHellen Configuration
+# ===========================================
+# Copy this file to .env and edit as needed
+# ===========================================
 
-DOWNLOAD_MODEL_PATH = ""
+# ===================
+# Model Storage
+# ===================
+# Path where NLP models will be downloaded and stored
+# Leave empty to use default: ~/.local/share/pyhellen
+DOWNLOAD_MODEL_PATH=""
+
+# Models to preload at startup (comma-separated)
+# Example: PRELOAD_MODELS="lasla,grc"
+PRELOAD_MODELS=""
+
+# ===================
+# Security Settings
+# ===================
+# Enable token-based authentication
+# When False (default), API is publicly accessible
+AUTH_ENABLED=false
+
+# Secret key for token hashing (REQUIRED if AUTH_ENABLED=true)
+# Generate a secure key with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+# NEVER commit this to version control!
+SECRET_KEY=""
+
+# Path to SQLite database for tokens
+TOKEN_DB_PATH="tokens.db"
+
+# Automatically create admin token on first run
+AUTO_CREATE_ADMIN_TOKEN=true
+
+# ===================
+# CORS Settings
+# ===================
+# Allowed origins (comma-separated)
+# Use "*" for development only! In production, list specific origins.
+# Example: CORS_ORIGINS="https://example.com,https://app.example.com"
+CORS_ORIGINS="*"
+
+# Allow credentials (cookies, authorization headers)
+# Cannot be true if CORS_ORIGINS contains "*"
+CORS_ALLOW_CREDENTIALS=false
+
+# ===================
+# Rate Limiting (Optional)
+# ===================
+# Enable rate limiting per IP
+RATE_LIMIT_ENABLED=false
+
+# Maximum requests per time window
+RATE_LIMIT_REQUESTS=100
+
+# Time window in seconds
+RATE_LIMIT_WINDOW_SECONDS=60
+
+# ===================
+# Processing Settings
+# ===================
+# Maximum concurrent text processing tasks
+MAX_CONCURRENT_PROCESSING=10
+
+# Batch size for model processing
+BATCH_SIZE=256
+
+# Model download timeout in seconds
+DOWNLOAD_TIMEOUT_SECONDS=300
+
+# Maximum retry attempts for failed downloads
+DOWNLOAD_MAX_RETRIES=3
+
+# ===================
+# Metrics
+# ===================
+# Enable performance metrics collection
+ENABLE_METRICS=true
+
+# ===================
+# SSL/TLS (Optional)
+# ===================
+# Path to SSL key file (for HTTPS)
+SSL_KEYFILE=""
+
+# Path to SSL certificate file (for HTTPS)
+SSL_CERTFILE=""
