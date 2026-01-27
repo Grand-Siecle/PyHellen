@@ -36,9 +36,10 @@ class TestModelsEndpoint:
         assert "models" in data
 
     def test_get_model_info_not_found(self, client):
-        """Test getting info for non-existent model."""
+        """Test getting info for non-existent model returns 400 (invalid model name)."""
         response = client.get("/api/models/nonexistent_model")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        # Model name validation returns 400 Bad Request for invalid model names
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_get_model_info_valid(self, client):
         """Test getting info for a valid model."""
@@ -210,9 +211,10 @@ class TestUnloadEndpoint:
     """Test suite for model unload endpoint."""
 
     def test_unload_not_loaded_model(self, client):
-        """Test unloading a model that is not loaded."""
+        """Test unloading a model with invalid name returns 400."""
         response = client.post("/api/models/nonexistent_xyz/unload")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        # Model name validation returns 400 Bad Request for invalid model names
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_unload_response_structure(self, client):
         """Test unload endpoint response structure on success."""
@@ -227,6 +229,7 @@ class TestLoadEndpoint:
     """Test suite for model load endpoint."""
 
     def test_load_invalid_model(self, client):
-        """Test loading an invalid model returns error."""
+        """Test loading an invalid model returns 400 Bad Request."""
         response = client.post("/api/models/invalid_model_xyz/load")
-        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        # Model name validation returns 400 Bad Request for invalid model names
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
