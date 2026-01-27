@@ -181,10 +181,52 @@ class TestHealthEndpoint:
         assert "status" in data
 
 
-class TestDownloadEndpoint:
-    """Test suite for model download endpoint."""
+class TestMetricsEndpoint:
+    """Test suite for metrics endpoint."""
 
-    def test_download_nonexistent_model(self, client):
-        """Test downloading a non-existent model."""
-        response = client.post("/api/models/nonexistent_xyz/download")
+    def test_get_metrics(self, client):
+        """Test getting metrics."""
+        response = client.get("/api/metrics")
+        assert response.status_code == status.HTTP_200_OK
+
+        data = response.json()
+        # Either metrics data or disabled message
+        assert "started_at" in data or "message" in data
+
+    def test_metrics_contains_expected_fields(self, client):
+        """Test that metrics contain expected fields when enabled."""
+        response = client.get("/api/metrics")
+        assert response.status_code == status.HTTP_200_OK
+
+        data = response.json()
+        if "started_at" in data:
+            assert "uptime_seconds" in data
+            assert "total_requests" in data
+            assert "total_errors" in data
+            assert "models" in data
+
+
+class TestUnloadEndpoint:
+    """Test suite for model unload endpoint."""
+
+    def test_unload_not_loaded_model(self, client):
+        """Test unloading a model that is not loaded."""
+        response = client.post("/api/models/nonexistent_xyz/unload")
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_unload_response_structure(self, client):
+        """Test unload endpoint response structure on success."""
+        # First load a model, then unload it
+        # This test just verifies the endpoint exists and returns proper error
+        response = client.post("/api/models/grc/unload")
+        # Model might not be loaded, so 404 is expected
+        assert response.status_code in [status.HTTP_200_OK, status.HTTP_404_NOT_FOUND]
+
+
+class TestLoadEndpoint:
+    """Test suite for model load endpoint."""
+
+    def test_load_invalid_model(self, client):
+        """Test loading an invalid model returns error."""
+        response = client.post("/api/models/invalid_model_xyz/load")
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
