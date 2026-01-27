@@ -13,6 +13,7 @@ from app.core.logger import logger
 from app.core.security import require_auth, require_admin, Token, TokenScope
 from app.core.security.auth import require_scope
 from app.core.security.middleware import validate_model_name, get_allowed_models
+from app.core.database import get_db_manager, ModelRepository
 
 router = APIRouter()
 
@@ -99,16 +100,28 @@ def _handle_processing_error(model: str, error: Exception) -> None:
 # Public Endpoints (no auth or read scope)
 # ===================
 
-@router.get("/languages", response_model=SupportedLanguages)
+@router.get("/languages")
 async def get_languages():
     """
     Return a list of supported language schemas.
 
     **Returns**:
-    - **200**: A JSON object with a list of supported language codes.
+    - **200**: A JSON object with a list of supported languages from the database.
     """
-    languages = list(PieLanguage)
-    return {"languages": languages}
+    model_repo = ModelRepository()
+    models = model_repo.get_all(include_inactive=False)
+
+    return {
+        "languages": [
+            {
+                "code": m.code,
+                "name": m.name,
+                "description": m.description
+            }
+            for m in models
+        ],
+        "count": len(models)
+    }
 
 
 @router.get("/tag/{model}")

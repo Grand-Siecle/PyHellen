@@ -4,9 +4,9 @@ from fastapi import APIRouter, Request
 from app.schemas.services import (HealthCheckResponse,
                                   StatusResponse, StatusSchema,
                                   CPUStatusSchema, GPUStatusSchema, ModelStatusSchema)
-from app.schemas.nlp import PieLanguage
 from app.core.utils import check_gpu_availability, get_device, get_n_workers
 from app.core.settings import Settings
+from app.core.database import get_db_manager, ModelRepository
 
 
 router = APIRouter()
@@ -50,11 +50,15 @@ async def status_models(request: Request):
     else:
         status["cpu"] = CPUStatusSchema(workers=get_n_workers())
 
+    # Get models from database
+    model_repo = ModelRepository()
+    db_models = model_repo.get_all(include_inactive=False)
+
     models = {}
-    for language in PieLanguage:
-        models[language.name] = ModelStatusSchema(
-            language=language.value,
-            status=request.app.state.taggers_ml.get(language.value, "not loaded")
+    for model in db_models:
+        models[model.code] = ModelStatusSchema(
+            language=model.name,
+            status=request.app.state.taggers_ml.get(model.code, "not loaded")
         )
 
     status["models"] = models
