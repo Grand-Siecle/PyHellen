@@ -8,3 +8,5 @@ _pycache_/
 *.pyc
 .DS_STORE
 *.log
+
+CLAUDE.md
