@@ -1,132 +1,281 @@
-# PyHellen - NLP API with Pie models
+# PyHellen - Historical Languages NLP API
 
-This document describes the improved model management and streaming API for the PyHellen NLP service, which provides access to various historical linguistic taggers for multiple languages using Pie Extended.
+FastAPI-based REST API providing access to historical linguistic taggers using [Pie Extended](https://github.com/hipster-philology/nlp-pie-taggers). Supports Classical Latin, Ancient Greek, Old French, Early Modern French, Classical French, Old Dutch, and Occitan.
 
-## Key Improvements
+## Features
 
-1. **Enhanced Model Management**
-   - Centralized model manager singleton for better state management
-   - Proper integration with Pie Extended's `get_tagger` and iterator/processor pattern
-   - Improved download handling with proper locking mechanisms
-   - Status tracking for models
-   - Support for batch processing and streaming responses
+- **Multiple Languages**: 7 historical language models available
+- **High Performance**: Concurrent batch processing, LRU caching with TTL
+- **Streaming**: NDJSON and Server-Sent Events (SSE) formats
+- **GPU Support**: Automatic CUDA detection and utilization
+- **Production Ready**: Health checks, model preloading, comprehensive API
 
-2. **New API Endpoints**
-   - `/api/tag/{model}` - Process a single text input
-   - `/api/batch/{model}` - Process multiple texts in one request
-   - `/api/stream/{model}` - Stream process multiple texts
-   - `/api/models` - Get status of all models
-   - `/api/models/{model}/download` - Explicitly trigger model download
+## Supported Languages
 
-## Configuration
+| Code | Language |
+|------|----------|
+| `lasla` | Classical Latin |
+| `grc` | Ancient Greek |
+| `fro` | Old French |
+| `freem` | Early Modern French |
+| `fr` | Classical French |
+| `dum` | Old Dutch |
+| `occ_cont` | Occitan Contemporain |
 
-The application requires Python 3.8 to 3.10 and the following environment variable:
+## Installation
 
+```bash
+# Clone the repository
+git clone https://github.com/Grand-Siecle/PyHellen.git
+cd PyHellen
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # Linux/macOS
+# or: venv\Scripts\activate  # Windows
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure environment
+cp edit_dot_env .env
+# Edit .env to set DOWNLOAD_MODEL_PATH="/path/to/store/models"
 ```
-DOWNLOAD_MODEL_PATH="/path/to/store/models"
+
+**Requirements**: Python 3.8-3.10
+
+## Quick Start
+
+```bash
+# Start the server
+python -m app.main
+
+# Server runs on http://localhost:8000
+# API docs: http://localhost:8000/docs
 ```
 
-## Usage Examples
+## API Endpoints
 
-### Single Text Processing
+### Text Processing
 
+#### Single Text (GET)
+```bash
+curl "http://localhost:8000/api/tag/lasla?text=Gallia%20est%20omnis%20divisa"
+```
+
+#### Single Text (POST)
 ```bash
 curl -X POST "http://localhost:8000/api/tag/lasla" \
   -H "Content-Type: application/json" \
-  -d '{"text": "Lorem ipsum dolor sit amet", "lower": true}'
+  -d '{"text": "Gallia est omnis divisa in partes tres", "lower": false}'
 ```
 
-### Batch Processing
-
+#### Batch Processing (Concurrent)
 ```bash
-curl -X POST "http://localhost:8000/api/batch/lasla" \
+curl -X POST "http://localhost:8000/api/batch/lasla?concurrent=true" \
   -H "Content-Type: application/json" \
   -d '{
     "texts": [
-      "Lorem ipsum dolor sit amet", 
-      "Consectetur adipiscing elit"
+      "Lorem ipsum dolor sit amet",
+      "Consectetur adipiscing elit",
+      "Sed do eiusmod tempor"
     ],
     "lower": false
   }'
 ```
 
-### Streaming Processing
-
+#### Streaming (NDJSON)
 ```bash
-curl -X POST "http://localhost:8000/api/stream/lasla" \
+curl -X POST "http://localhost:8000/api/stream/lasla?format=ndjson" \
   -H "Content-Type: application/json" \
-  -d '{
-    "texts": [
-      "Lorem ipsum dolor sit amet", 
-      "Consectetur adipiscing elit",
-      "Sed do eiusmod tempor incididunt"
-    ],
-    "lower": true
-  }'
+  -d '{"texts": ["Text 1", "Text 2", "Text 3"], "lower": true}'
 ```
 
-### Get Model Status
-
+#### Streaming (Server-Sent Events)
 ```bash
-curl -X GET "http://localhost:8000/api/models"
+curl -X POST "http://localhost:8000/api/stream/lasla?format=sse" \
+  -H "Content-Type: application/json" \
+  -d '{"texts": ["Text 1", "Text 2"], "lower": false}'
 ```
 
-### Download a Model
+### Model Management
 
 ```bash
+# List all models and their status
+curl "http://localhost:8000/api/models"
+
+# Get detailed model info
+curl "http://localhost:8000/api/models/lasla"
+
+# Download a model
 curl -X POST "http://localhost:8000/api/models/lasla/download"
+
+# Preload a model into memory
+curl -X POST "http://localhost:8000/api/models/lasla/load"
 ```
 
-## Integration Example
+### Cache Management
 
-Here's how to integrate the streaming API with JavaScript:
+```bash
+# Get cache statistics
+curl "http://localhost:8000/api/cache/stats"
 
+# Clear all cached results
+curl -X POST "http://localhost:8000/api/cache/clear"
+
+# Remove expired entries
+curl -X POST "http://localhost:8000/api/cache/cleanup"
+```
+
+### Service Health
+
+```bash
+# Health check
+curl "http://localhost:8000/service/health"
+
+# Detailed status (GPU/CPU info)
+curl "http://localhost:8000/service/api/status"
+```
+
+## Response Examples
+
+### Tag Response
+```json
+{
+  "result": [
+    {"form": "Gallia", "lemma": "Gallia", "pos": "NOMpro", "morph": "Case=Nom|Numb=Sing"},
+    {"form": "est", "lemma": "sum", "pos": "VER", "morph": "Mood=Ind|Numb=Sing|Tense=Pres"}
+  ],
+  "processing_time_ms": 45.23,
+  "model": "lasla",
+  "from_cache": false
+}
+```
+
+### Batch Response
+```json
+{
+  "results": [[...], [...], [...]],
+  "total_texts": 3,
+  "processing_time_ms": 123.45,
+  "model": "lasla",
+  "cache_hits": 1
+}
+```
+
+### NDJSON Stream (one JSON per line)
+```json
+{"index": 0, "text": "Lorem ipsum...", "result": [...], "processing_time_ms": 42.1, "from_cache": false}
+{"index": 1, "text": "Consectetur...", "result": [...], "processing_time_ms": 38.5, "from_cache": false}
+```
+
+## JavaScript Integration
+
+### NDJSON Streaming
 ```javascript
-async function streamProcess() {
-  const response = await fetch('http://localhost:8000/api/stream/lasla', {
+async function processTexts(texts) {
+  const response = await fetch('http://localhost:8000/api/stream/lasla?format=ndjson', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      texts: [
-        "Text 1 to analyze",
-        "Text 2 to analyze",
-        "Text 3 to analyze"
-      ],
-      lower: true
-    }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ texts, lower: false })
   });
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  
-  let resultArea = document.getElementById('results');
-  
+
   while (true) {
     const { done, value } = await reader.read();
-    
-    if (done) {
-      break;
+    if (done) break;
+
+    const lines = decoder.decode(value).split('\n').filter(l => l);
+    for (const line of lines) {
+      const result = JSON.parse(line);
+      console.log(`Processed ${result.index}: ${result.processing_time_ms}ms`);
     }
-    
-    // Process the stream chunks as they arrive
-    const text = decoder.decode(value);
-    resultArea.innerHTML += text;
   }
 }
 ```
 
-## API Documentation
+### Server-Sent Events
+```javascript
+async function processWithSSE(texts) {
+  const response = await fetch('http://localhost:8000/api/stream/lasla?format=sse', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ texts, lower: false })
+  });
 
-Full API documentation is available at:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
 
-## Running the Application
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
 
-```bash
-python -m app.main
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split('\n\n');
+    buffer = events.pop();
+
+    for (const event of events) {
+      const [eventLine, dataLine] = event.split('\n');
+      const eventType = eventLine.replace('event: ', '');
+      const data = JSON.parse(dataLine.replace('data: ', ''));
+
+      if (eventType === 'result') {
+        console.log(`Progress: ${data.progress}`);
+      }
+    }
+  }
+}
 ```
 
-The server will start on `http://localhost:8000`.
+## Testing
+
+```bash
+# Install dev dependencies
+pip install -r requirements-dev.txt
+
+# Run tests
+pytest tests/ -v
+
+# Run with coverage
+pytest tests/ --cov=app --cov-report=html
+```
+
+## Configuration
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `DOWNLOAD_MODEL_PATH` | Path to store model files | `~/.local/share/pyhellen` |
+| `SSL_KEYFILE` | SSL key file path | None |
+| `SSL_CERTFILE` | SSL certificate path | None |
+
+## Architecture
+
+```
+app/
+├── main.py              # FastAPI app factory
+├── core/
+│   ├── model_manager.py # Model lifecycle, concurrent processing
+│   ├── cache.py         # LRU cache with TTL
+│   ├── settings.py      # Configuration
+│   └── utils.py         # GPU/CPU detection
+├── routes/
+│   ├── api.py           # NLP endpoints
+│   └── service.py       # Health endpoints
+└── schemas/
+    ├── nlp.py           # NLP schemas
+    └── services.py      # Service schemas
+```
+
+## License
+
+See LICENSE file.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Run tests: `pytest tests/ -v`
+4. Submit a pull request
