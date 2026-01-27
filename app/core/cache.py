@@ -18,6 +18,7 @@ class CacheEntry:
     """A single cache entry with value and expiration time."""
     value: Any
     expires_at: float
+    model: str
     hits: int = 0
 
 
@@ -124,7 +125,7 @@ class HybridCache:
                     expires_at = time.time() + self._ttl_seconds
                     if len(self._cache) >= self._max_size:
                         self._cache.popitem(last=False)
-                    self._cache[key] = CacheEntry(value=value, expires_at=expires_at, hits=1)
+                    self._cache[key] = CacheEntry(value=value, expires_at=expires_at, model=model, hits=1)
                     self._hits += 1
                 return value
 
@@ -146,7 +147,7 @@ class HybridCache:
             if len(self._cache) >= self._max_size and key not in self._cache:
                 self._cache.popitem(last=False)
 
-            self._cache[key] = CacheEntry(value=value, expires_at=expires_at)
+            self._cache[key] = CacheEntry(value=value, expires_at=expires_at, model=model)
             self._cache.move_to_end(key)
 
         # Persist to database (fire and forget)
@@ -205,18 +206,18 @@ class HybridCache:
 
     async def clear_model(self, model: str) -> int:
         """Clear all cache entries for a specific model."""
-        count = 0
+        memory_count = 0
+        db_count = 0
 
-        # Clear from in-memory (we need to check each key)
+        # Clear from in-memory using the model field in CacheEntry
         async with self._lock:
             keys_to_remove = [
-                key for key in self._cache.keys()
-                if key.startswith(hashlib.sha256(f"{model}:".encode()).hexdigest()[:8])
+                key for key, entry in self._cache.items()
+                if entry.model == model
             ]
-            # This won't work perfectly for in-memory, so just track DB count
             for key in keys_to_remove:
                 del self._cache[key]
-            count = len(keys_to_remove)
+            memory_count = len(keys_to_remove)
 
         # Clear from database
         if self._persist:
@@ -224,11 +225,14 @@ class HybridCache:
             if repo:
                 try:
                     db_count = repo.clear_by_model(model)
-                    count = max(count, db_count)
                 except Exception as e:
                     logger.warning(f"Error clearing model cache from DB: {e}")
 
-        return count
+        total_count = memory_count + db_count
+        if total_count > 0:
+            logger.info(f"Cleared {total_count} cache entries for model '{model}' (memory: {memory_count}, db: {db_count})")
+
+        return total_count
 
     @property
     def stats(self) -> Dict[str, Any]:
