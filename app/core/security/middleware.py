@@ -111,6 +111,7 @@ def validate_model_name(model: str, allowed_models: List[str]) -> str:
 
 
 def get_allowed_models() -> List[str]:
-    """Get list of allowed model names from PieLanguage enum."""
-    from app.schemas.nlp import PieLanguage
-    return [lang.name for lang in PieLanguage]
+    """Get list of allowed model names from database."""
+    from app.core.database import ModelRepository
+    model_repo = ModelRepository()
+    return model_repo.get_active_codes()
