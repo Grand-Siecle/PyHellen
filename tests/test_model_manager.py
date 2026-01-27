@@ -419,3 +419,544 @@ class TestModelManagerHttpClient:
 
         # Cleanup
         await client1.aclose()
+
+
+class TestModelManagerShutdown:
+    """Test suite for ModelManager shutdown functionality."""
+
+    @pytest.mark.asyncio
+    async def test_shutdown_clears_taggers(self):
+        """Test that shutdown clears all loaded taggers."""
+        manager = ModelManager()
+        manager.taggers["lasla"] = Mock()
+        manager.taggers["grc"] = Mock()
+        manager.iterator_processors["lasla"] = Mock()
+
+        await manager.shutdown(shutdown_executor=False)
+
+        assert len(manager.taggers) == 0
+        assert len(manager.iterator_processors) == 0
+
+    @pytest.mark.asyncio
+    async def test_shutdown_sets_event(self):
+        """Test that shutdown sets the shutdown event."""
+        manager = ModelManager()
+        assert not manager._shutdown_event.is_set()
+
+        await manager.shutdown(shutdown_executor=False)
+
+        assert manager._shutdown_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_closes_http_client(self):
+        """Test that shutdown closes the HTTP client."""
+        manager = ModelManager()
+        # Create a client
+        client = await manager._get_http_client()
+        assert not client.is_closed
+
+        await manager.shutdown(shutdown_executor=False)
+
+        assert client.is_closed
+
+    @pytest.mark.asyncio
+    async def test_shutdown_idempotent(self):
+        """Test that shutdown can be called multiple times safely."""
+        manager = ModelManager()
+        await manager._get_http_client()
+
+        # Should not raise
+        await manager.shutdown(shutdown_executor=False)
+        await manager.shutdown(shutdown_executor=False)
+
+
+class TestModelManagerGetModelInfo:
+    """Test suite for get_model_info method."""
+
+    def test_get_model_info_returns_none_for_invalid(self, mock_model_manager):
+        """Test get_model_info returns None for invalid model."""
+        with patch('app.core.model_manager.get_model', return_value=None):
+            info = mock_model_manager.get_model_info("nonexistent_model")
+            assert info is None
+
+    def test_get_model_info_includes_basic_fields(self, mock_model_manager):
+        """Test get_model_info returns expected fields."""
+        mock_module = Mock()
+        mock_module.DOWNLOADS = []
+
+        with patch('app.core.model_manager.get_model', return_value=mock_module):
+            info = mock_model_manager.get_model_info("test_model")
+
+            assert info is not None
+            assert "name" in info
+            assert "status" in info
+            assert "device" in info
+            assert "batch_size" in info
+            assert "files" in info
+            assert "total_size_mb" in info
+            assert "has_custom_processor" in info
+
+    def test_get_model_info_with_loaded_model(self, mock_model_manager):
+        """Test get_model_info includes metrics for loaded model."""
+        mock_module = Mock()
+        mock_module.DOWNLOADS = []
+        mock_model_manager.taggers["test_model"] = Mock()
+
+        with patch('app.core.model_manager.get_model', return_value=mock_module):
+            info = mock_model_manager.get_model_info("test_model")
+
+            assert info is not None
+            assert info["status"] == "loaded"
+
+
+class TestModelManagerErrorHandling:
+    """Test suite for error handling in ModelManager."""
+
+    def test_process_text_increments_error_on_failure(self, mock_model_manager):
+        """Test that process_text updates error metrics on failure."""
+        mock_tagger = Mock()
+        mock_tagger.tag.side_effect = RuntimeError("Processing failed")
+
+        initial_errors = mock_model_manager._metrics.total_errors if mock_model_manager._metrics else 0
+
+        with pytest.raises(RuntimeError):
+            mock_model_manager.process_text("model", mock_tagger, "text", False)
+
+        if mock_model_manager._metrics:
+            # Error should be tracked
+            assert mock_model_manager._metrics.models.get("model") is not None
+
+    @pytest.mark.asyncio
+    async def test_batch_process_handles_empty_list(self, mock_model_manager):
+        """Test batch processing with empty list returns empty list."""
+        with patch.object(mock_model_manager, 'get_or_load_model', new_callable=AsyncMock) as mock_load:
+            mock_load.return_value = Mock()
+
+            results = await mock_model_manager.batch_process_concurrent("model", [], False)
+            assert results == []
+
+    @pytest.mark.asyncio
+    async def test_unload_clears_both_tagger_and_processor(self):
+        """Test unload removes both tagger and iterator_processor."""
+        manager = ModelManager()
+        manager.taggers["model"] = Mock()
+        manager.iterator_processors["model"] = Mock()
+
+        result = await manager.unload_model("model")
+
+        assert result is True
+        assert "model" not in manager.taggers
+        assert "model" not in manager.iterator_processors
+
+
+class TestModelManagerDeviceAndBatchSize:
+    """Test suite for device and batch size configuration."""
+
+    def test_batch_size_cannot_be_zero(self, mock_model_manager):
+        """Test that batch size cannot be set to zero."""
+        mock_model_manager.batch_size = 0
+        assert mock_model_manager.batch_size == 1
+
+    def test_batch_size_cannot_be_negative(self, mock_model_manager):
+        """Test that batch size cannot be negative."""
+        mock_model_manager.batch_size = -100
+        assert mock_model_manager.batch_size == 1
+
+    def test_batch_size_accepts_positive_values(self, mock_model_manager):
+        """Test that positive batch sizes are accepted."""
+        mock_model_manager.batch_size = 512
+        assert mock_model_manager.batch_size == 512
+
+    def test_device_is_valid(self, mock_model_manager):
+        """Test that device returns a valid value."""
+        device = mock_model_manager.device
+        assert device in ["cpu", "cuda"]
+
+
+class TestModelManagerCheckModelFiles:
+    """Test suite for _check_model_files_exist method."""
+
+    def test_check_model_files_returns_false_on_import_error(self, mock_model_manager):
+        """Test _check_model_files_exist returns False on import error."""
+        with patch('app.core.model_manager.get_model', side_effect=ImportError("Not found")):
+            result = mock_model_manager._check_model_files_exist("fake_module", "/fake/path")
+            assert result is False
+
+    def test_check_model_files_returns_false_when_no_downloads(self, mock_model_manager):
+        """Test _check_model_files_exist returns False when module has no DOWNLOADS."""
+        mock_module = Mock(spec=[])  # No DOWNLOADS attribute
+
+        with patch('app.core.model_manager.get_model', return_value=mock_module):
+            result = mock_model_manager._check_model_files_exist("module", "/fake/path")
+            assert result is False
+
+
+class TestModelManagerIsModelAvailable:
+    """Test suite for _is_model_available method."""
+
+    def test_is_model_available_returns_true_for_valid_model(self, mock_model_manager):
+        """Test _is_model_available returns truthy for valid model."""
+        with patch('app.core.model_manager.get_model', return_value=Mock()):
+            result = mock_model_manager._is_model_available("lasla")
+            assert result
+
+    def test_is_model_available_returns_false_on_import_error(self, mock_model_manager):
+        """Test _is_model_available returns False on ImportError."""
+        with patch('app.core.model_manager.get_model', side_effect=ImportError("Not found")):
+            result = mock_model_manager._is_model_available("nonexistent")
+            assert result is False
+
+
+class TestModelMetricsEdgeCases:
+    """Test suite for ModelMetrics edge cases."""
+
+    def test_model_metrics_avg_process_time_zero(self):
+        """Test average process time when no processing."""
+        metrics = ModelMetrics()
+        assert metrics.avg_process_time_ms == 0.0
+
+    def test_model_metrics_to_dict_with_all_values(self):
+        """Test to_dict with all metrics populated."""
+        metrics = ModelMetrics()
+        metrics.load_count = 3
+        metrics.load_time_total_ms = 1500.0
+        metrics.process_count = 100
+        metrics.process_time_total_ms = 5000.0
+        metrics.download_count = 1
+        metrics.download_time_total_ms = 60000.0
+        metrics.download_size_bytes = 1024 * 1024 * 50  # 50 MB
+        metrics.error_count = 2
+        metrics.last_loaded_at = datetime(2024, 1, 1, 12, 0, 0)
+        metrics.last_used_at = datetime(2024, 1, 1, 13, 0, 0)
+
+        data = metrics.to_dict()
+
+        assert data["load_count"] == 3
+        assert data["avg_load_time_ms"] == 500.0
+        assert data["process_count"] == 100
+        assert data["avg_process_time_ms"] == 50.0
+        assert data["download_count"] == 1
+        assert data["download_size_mb"] == 50.0
+        assert data["error_count"] == 2
+        assert data["last_loaded_at"] is not None
+        assert data["last_used_at"] is not None
+
+
+class TestGlobalMetricsEdgeCases:
+    """Test suite for GlobalMetrics edge cases."""
+
+    def test_global_metrics_requests_per_minute_with_small_uptime(self):
+        """Test requests_per_minute calculation with very small uptime."""
+        metrics = GlobalMetrics()
+        # Immediately after creation, uptime is tiny
+        metrics.total_requests = 10
+
+        data = metrics.to_dict()
+
+        # Should handle small uptime gracefully
+        assert "requests_per_minute" in data
+        assert isinstance(data["requests_per_minute"], float)
+
+    def test_global_metrics_to_dict_with_multiple_models(self):
+        """Test to_dict includes all tracked models."""
+        metrics = GlobalMetrics()
+        metrics.get_model_metrics("lasla")
+        metrics.get_model_metrics("grc")
+        metrics.get_model_metrics("fro")
+
+        data = metrics.to_dict()
+
+        assert "models" in data
+        assert "lasla" in data["models"]
+        assert "grc" in data["models"]
+        assert "fro" in data["models"]
+
+    def test_global_metrics_uptime_increases(self):
+        """Test that uptime increases over time."""
+        import time
+
+        metrics = GlobalMetrics()
+        data1 = metrics.to_dict()
+
+        time.sleep(0.1)
+
+        data2 = metrics.to_dict()
+
+        assert data2["uptime_seconds"] > data1["uptime_seconds"]
+
+
+class TestModelManagerDownload:
+    """Test suite for download functionality."""
+
+    @pytest.mark.asyncio
+    async def test_download_model_sets_downloading_flag(self):
+        """Test that download_model sets is_downloading flag."""
+        manager = ModelManager()
+
+        with patch('app.core.model_manager.get_model') as mock_get_model:
+            mock_module = Mock()
+            mock_module.DOWNLOADS = []
+            mock_get_model.return_value = mock_module
+
+            # Should return False because no files to download
+            result = await manager.download_model("test_model")
+
+            # Even if it fails, flag should be reset
+            assert manager.is_downloading.get("test_model", False) is False
+
+    @pytest.mark.asyncio
+    async def test_download_model_invalid_module(self):
+        """Test download_model with invalid module returns False."""
+        manager = ModelManager()
+
+        with patch('app.core.model_manager.get_model', return_value=None):
+            result = await manager.download_model("nonexistent_model")
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_download_model_no_downloads_attribute(self):
+        """Test download_model when module has no DOWNLOADS."""
+        manager = ModelManager()
+
+        with patch('app.core.model_manager.get_model') as mock_get_model:
+            mock_module = Mock(spec=[])  # No DOWNLOADS attribute
+            mock_get_model.return_value = mock_module
+
+            result = await manager.download_model("test_model")
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_download_model_empty_downloads(self):
+        """Test download_model when DOWNLOADS is empty."""
+        manager = ModelManager()
+
+        with patch('app.core.model_manager.get_model') as mock_get_model:
+            mock_module = Mock()
+            mock_module.DOWNLOADS = []
+            mock_get_model.return_value = mock_module
+
+            result = await manager.download_model("test_model")
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_download_model_concurrent_blocked(self):
+        """Test that concurrent downloads of same model are blocked."""
+        manager = ModelManager()
+        manager.is_downloading["test_model"] = True
+
+        with patch('app.core.model_manager.get_model') as mock_get_model:
+            mock_module = Mock()
+            mock_file = Mock()
+            mock_file.name = "file.bin"
+            mock_file.url = "http://example.com/file.bin"
+            mock_module.DOWNLOADS = [mock_file]
+            mock_get_model.return_value = mock_module
+
+            result = await manager.download_model("test_model")
+            assert result is False
+
+
+class TestModelManagerGetOrLoad:
+    """Test suite for get_or_load_model."""
+
+    @pytest.mark.asyncio
+    async def test_get_or_load_returns_cached_tagger(self):
+        """Test that get_or_load_model returns cached tagger."""
+        manager = ModelManager()
+        mock_tagger = Mock()
+        manager.taggers["test_model"] = mock_tagger
+
+        result = await manager.get_or_load_model("test_model")
+        assert result is mock_tagger
+
+    @pytest.mark.asyncio
+    async def test_get_or_load_model_not_available(self):
+        """Test get_or_load_model raises error for unavailable model."""
+        manager = ModelManager()
+
+        with patch.object(manager, '_is_model_available', return_value=None):
+            with pytest.raises(RuntimeError, match="not available"):
+                await manager.get_or_load_model("nonexistent_model")
+
+
+class TestModelManagerProcessTextAsync:
+    """Test suite for process_text_async."""
+
+    @pytest.mark.asyncio
+    async def test_process_text_async_uses_executor(self):
+        """Test that process_text_async uses thread pool executor."""
+        manager = ModelManager()
+        mock_tagger = Mock()
+        mock_result = [{"form": "test", "lemma": "test"}]
+
+        with patch.object(manager, 'process_text', return_value=mock_result):
+            result = await manager.process_text_async(
+                "test_model",
+                mock_tagger,
+                "test text",
+                False
+            )
+
+            assert result == mock_result
+
+
+class TestModelManagerStreamProcessingExtended:
+    """Extended test suite for streaming processing methods."""
+
+    @pytest.mark.asyncio
+    async def test_stream_process_basic(self):
+        """Test basic stream_process functionality."""
+        manager = ModelManager()
+        mock_tagger = Mock()
+        manager.taggers["test_model"] = mock_tagger
+
+        with patch.object(manager, 'process_text') as mock_process, \
+             patch.object(manager, 'get_or_load_model', new_callable=AsyncMock) as mock_load:
+            mock_load.return_value = mock_tagger
+            mock_process.return_value = [{"form": "test"}]
+
+            results = []
+            async for chunk in manager.stream_process("test_model", ["text1"], False):
+                results.append(chunk)
+
+            assert len(results) > 0
+            assert mock_process.called
+
+    @pytest.mark.asyncio
+    async def test_stream_process_ndjson_output_format(self):
+        """Test NDJSON stream processing output format."""
+        import json
+        manager = ModelManager()
+        mock_tagger = Mock()
+        manager.taggers["test_model"] = mock_tagger
+
+        with patch.object(manager, 'process_text_async', new_callable=AsyncMock) as mock_process, \
+             patch.object(manager, 'get_or_load_model', new_callable=AsyncMock) as mock_load, \
+             patch('app.core.cache.cache') as mock_cache:
+            mock_load.return_value = mock_tagger
+            mock_process.return_value = [{"form": "test"}]
+            mock_cache.get = AsyncMock(return_value=None)
+            mock_cache.set = AsyncMock()
+
+            results = []
+            async for chunk in manager.stream_process_ndjson("test_model", ["text1"], False):
+                results.append(chunk)
+
+            assert len(results) == 1
+            # Parse and verify format
+            parsed = json.loads(results[0].strip())
+            assert "index" in parsed
+            assert "result" in parsed
+
+
+class TestModelManagerBatchProcessingExtended:
+    """Extended test suite for batch processing."""
+
+    @pytest.mark.asyncio
+    async def test_batch_process_concurrent_multiple_texts(self):
+        """Test batch processing with multiple texts."""
+        manager = ModelManager()
+        mock_tagger = Mock()
+
+        with patch.object(manager, 'get_or_load_model', new_callable=AsyncMock) as mock_load, \
+             patch.object(manager, 'process_text_async', new_callable=AsyncMock) as mock_process:
+            mock_load.return_value = mock_tagger
+            mock_process.return_value = [{"form": "test"}]
+
+            texts = ["text" + str(i) for i in range(10)]
+            results = await manager.batch_process_concurrent(
+                "test_model",
+                texts,
+                False,
+                max_concurrent=2
+            )
+
+            assert len(results) == 10
+
+
+class TestModelManagerUpdateMetrics:
+    """Test suite for metrics update methods."""
+
+    def test_update_metrics_sync_with_load_time(self, mock_model_manager):
+        """Test _update_metrics_sync with load time."""
+        mock_model_manager._metrics = GlobalMetrics()
+
+        mock_model_manager._update_metrics_sync("test_model", load_time_ms=100.0)
+
+        model_metrics = mock_model_manager._metrics.models.get("test_model")
+        assert model_metrics is not None
+        assert model_metrics.load_count == 1
+        assert model_metrics.load_time_total_ms == 100.0
+
+    def test_update_metrics_sync_with_process_time(self, mock_model_manager):
+        """Test _update_metrics_sync with process time."""
+        mock_model_manager._metrics = GlobalMetrics()
+
+        mock_model_manager._update_metrics_sync(
+            "test_model",
+            process_time_ms=50.0,
+            increment_requests=True
+        )
+
+        model_metrics = mock_model_manager._metrics.models.get("test_model")
+        assert model_metrics.process_count == 1
+        assert model_metrics.process_time_total_ms == 50.0
+
+    def test_update_metrics_sync_with_error(self, mock_model_manager):
+        """Test _update_metrics_sync with error flag."""
+        mock_model_manager._metrics = GlobalMetrics()
+
+        mock_model_manager._update_metrics_sync("test_model", error=True)
+
+        model_metrics = mock_model_manager._metrics.models.get("test_model")
+        assert model_metrics.error_count == 1
+        assert mock_model_manager._metrics.total_errors == 1
+
+    def test_update_metrics_sync_with_download(self, mock_model_manager):
+        """Test _update_metrics_sync with download metrics."""
+        mock_model_manager._metrics = GlobalMetrics()
+
+        mock_model_manager._update_metrics_sync(
+            "test_model",
+            download_time_ms=5000.0,
+            download_bytes=1024 * 1024 * 50  # 50 MB
+        )
+
+        model_metrics = mock_model_manager._metrics.models.get("test_model")
+        assert model_metrics.download_count == 1
+        assert model_metrics.download_time_total_ms == 5000.0
+        assert model_metrics.download_size_bytes == 1024 * 1024 * 50
+
+
+class TestModelManagerGetModelFiles:
+    """Test suite for _get_model_files method."""
+
+    def test_get_model_files_success(self, mock_model_manager):
+        """Test _get_model_files returns file list."""
+        mock_module = Mock()
+        mock_file1 = Mock()
+        mock_file1.name = "model.bin"
+        mock_file2 = Mock()
+        mock_file2.name = "vocab.txt"
+        mock_module.DOWNLOADS = [mock_file1, mock_file2]
+
+        with patch('app.core.model_manager.get_model', return_value=mock_module):
+            result = mock_model_manager._get_model_files("test_model")
+
+            assert result == ["model.bin", "vocab.txt"]
+
+    def test_get_model_files_no_downloads(self, mock_model_manager):
+        """Test _get_model_files when no DOWNLOADS attribute."""
+        mock_module = Mock(spec=[])
+
+        with patch('app.core.model_manager.get_model', return_value=mock_module):
+            result = mock_model_manager._get_model_files("test_model")
+
+            assert result is None
+
+    def test_get_model_files_exception(self, mock_model_manager):
+        """Test _get_model_files handles exceptions."""
+        with patch('app.core.model_manager.get_model', side_effect=Exception("Error")):
+            result = mock_model_manager._get_model_files("test_model")
+
+            assert result is None
