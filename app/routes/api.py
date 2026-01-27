@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional, Any
 import time
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Query
+from fastapi import APIRouter, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
@@ -400,43 +400,6 @@ async def get_model_info(model: str):
     return info
 
 
-@router.post("/models/{model}/download")
-async def download_model(model: str, background_tasks: BackgroundTasks):
-    """
-    Trigger download of a model.
-
-    This endpoint initiates the download of a specified model in the background.
-
-    **Parameters**:
-    - **model**: The name of the model to download
-
-    **Returns**:
-    - **202**: Accepted, with information about the download process
-    - **400**: If the model is already being downloaded
-    - **404**: If the model is not found
-
-    **Example**:
-    ```bash
-    curl -X POST http://{address}/api/models/lasla/download
-    ```
-    """
-    if model_manager.is_downloading.get(model, False):
-        return {
-            "status": "already_downloading",
-            "message": f"Model '{model}' is already being downloaded"
-        }
-
-    if not model_manager._is_model_available(model):
-        raise HTTPException(status_code=404, detail=f"Model '{model}' not found")
-
-    background_tasks.add_task(model_manager.download_model, model)
-
-    return {
-        "status": "downloading",
-        "message": f"Download of model '{model}' started in the background"
-    }
-
-
 @router.post("/models/{model}/load")
 async def preload_model(model: str):
     """
@@ -522,3 +485,54 @@ async def cleanup_cache():
     """
     count = await cache.cleanup_expired()
     return {"removed_entries": count, "message": "Expired entries cleaned up"}
+
+
+@router.get("/metrics")
+async def get_metrics():
+    """
+    Get performance metrics for the model manager.
+
+    Returns metrics including:
+    - Uptime and total requests
+    - Per-model statistics (load times, process times, error counts)
+    - Request rates
+
+    **Returns**:
+    - **200**: Metrics data or message if metrics are disabled
+
+    **Example**:
+    ```bash
+    curl -X GET http://{address}/api/metrics
+    ```
+    """
+    metrics = model_manager.metrics
+    if metrics is None:
+        return {"message": "Metrics collection is disabled"}
+    return metrics
+
+
+@router.post("/models/{model}/unload")
+async def unload_model(model: str):
+    """
+    Unload a model from memory to free resources.
+
+    **Parameters**:
+    - **model**: The name of the model to unload
+
+    **Returns**:
+    - **200**: Model unloaded successfully
+    - **404**: If the model is not loaded
+
+    **Example**:
+    ```bash
+    curl -X POST http://{address}/api/models/lasla/unload
+    ```
+    """
+    success = await model_manager.unload_model(model)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Model '{model}' is not loaded")
+    return {
+        "status": "unloaded",
+        "model": model,
+        "message": f"Model '{model}' has been unloaded from memory"
+    }
