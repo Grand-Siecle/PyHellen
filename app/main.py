@@ -15,6 +15,8 @@ from app.core.model_manager import model_manager
 from app.core.environment import PIE_EXTENDED_DOWNLOADS
 from app.core.security import AuthManager
 from app.core.security.middleware import SecurityHeadersMiddleware, setup_exception_handlers
+from app.core.database import get_db_manager, ModelRepository
+from app.core.middleware import RequestLoggerMiddleware
 
 
 @asynccontextmanager
@@ -31,6 +33,12 @@ async def lifespan(app: FastAPI):
     # Initialize at startup
     logger.info("Starting up PyHellen API...")
     logger.info(f"Using PIE_EXTENDED_DOWNLOADS: {PIE_EXTENDED_DOWNLOADS}")
+
+    # Initialize database (creates tables and default models if needed)
+    db_engine = get_db_manager()  # get_db_manager is aliased to get_db_engine
+    model_repo = ModelRepository()
+    active_models = model_repo.get_active_codes()
+    logger.info(f"Database initialized. Active models: {active_models}")
 
     # Initialize authentication
     try:
@@ -59,10 +67,13 @@ async def lifespan(app: FastAPI):
     app.state.download_locks = {}
     app.state.is_downloading = {}
 
-    # Preload configured models
+    # Preload configured models (verify against database)
     if settings.preload_models:
         logger.info(f"Preloading models: {settings.preload_models}")
         for model_name in settings.preload_models:
+            if model_name not in active_models:
+                logger.warning(f"Skipping preload of '{model_name}': model not found or inactive in database")
+                continue
             try:
                 await model_manager.get_or_load_model(model_name)
                 logger.info(f"Preloaded model: {model_name}")
@@ -101,8 +112,11 @@ def create_application() -> FastAPI:
     )
 
     # ===================
-    # Security Middleware
+    # Middleware Stack (applied in reverse order)
     # ===================
+
+    # Request logging (applied first = runs last, after response)
+    app.add_middleware(RequestLoggerMiddleware, enabled=settings.enable_metrics)
 
     # Security headers (applied last = runs first)
     app.add_middleware(SecurityHeadersMiddleware)
