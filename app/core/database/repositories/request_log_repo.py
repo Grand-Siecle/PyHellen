@@ -82,7 +82,7 @@ class RequestLogRepository(BaseRepository):
         finally:
             self._close_session(session)
 
-    def get_by_model(self, model_code: str, limit: int = 100) -> List[RequestLog]:
+    def get_by_model(self, model_code: str, limit: int = 100, offset: int = 0) -> List[RequestLog]:
         """Get request logs for a specific model."""
         session = self._get_session()
         try:
@@ -97,6 +97,7 @@ class RequestLogRepository(BaseRepository):
                 select(RequestLog)
                 .where(RequestLog.model_id == model.id)
                 .order_by(col(RequestLog.timestamp).desc())
+                .offset(offset)
                 .limit(limit)
             ).all())
         finally:
