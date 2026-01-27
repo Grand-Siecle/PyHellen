@@ -16,10 +16,15 @@ class TestLanguagesEndpoint:
 
         data = response.json()
         assert "languages" in data
+        assert "count" in data
         assert len(data["languages"]) > 0
+        assert data["count"] == len(data["languages"])
 
-        # Check that known languages are present (returns language descriptions)
-        language_names = [lang for lang in data["languages"]]
+        # Check that known languages are present (now returns objects with code, name, description)
+        language_codes = [lang["code"] for lang in data["languages"]]
+        language_names = [lang["name"] for lang in data["languages"]]
+        assert "lasla" in language_codes
+        assert "grc" in language_codes
         assert "Classical Latin" in language_names
         assert "Ancient Greek" in language_names
 
@@ -62,11 +67,13 @@ class TestCacheEndpoint:
         assert response.status_code == status.HTTP_200_OK
 
         data = response.json()
-        assert "size" in data
+        # HybridCache uses memory_size instead of size
+        assert "memory_size" in data or "size" in data
         assert "max_size" in data
         assert "hits" in data
         assert "misses" in data
         assert "hit_rate_percent" in data
+        assert "persistence_enabled" in data
 
     def test_clear_cache(self, client):
         """Test clearing the cache."""

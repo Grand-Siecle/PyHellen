@@ -64,7 +64,7 @@ class TestLRUCache:
         await small_cache.set("m", "text3", False, "value3")
 
         # Cache should be full
-        assert small_cache.stats["size"] == 3
+        assert small_cache.stats["memory_size"] == 3
 
         # Access text1 to make it recently used
         await small_cache.get("m", "text1", False)
@@ -72,7 +72,7 @@ class TestLRUCache:
         # Add new entry, should evict text2 (least recently used)
         await small_cache.set("m", "text4", False, "value4")
 
-        assert small_cache.stats["size"] == 3
+        assert small_cache.stats["memory_size"] == 3
         assert await small_cache.get("m", "text1", False) == "value1"
         assert await small_cache.get("m", "text2", False) is None  # Evicted
         assert await small_cache.get("m", "text3", False) == "value3"
@@ -83,7 +83,7 @@ class TestLRUCache:
         """Test cache statistics."""
         # Initial stats
         stats = cache.stats
-        assert stats["size"] == 0
+        assert stats["memory_size"] == 0
         assert stats["hits"] == 0
         assert stats["misses"] == 0
 
@@ -93,7 +93,7 @@ class TestLRUCache:
         await cache.get("m", "text2", False)  # Miss
 
         stats = cache.stats
-        assert stats["size"] == 1
+        assert stats["memory_size"] == 1
         assert stats["hits"] == 1
         assert stats["misses"] == 1
         assert stats["hit_rate_percent"] == 50.0
@@ -104,12 +104,12 @@ class TestLRUCache:
         await cache.set("m", "text1", False, "v1")
         await cache.set("m", "text2", False, "v2")
 
-        assert cache.stats["size"] == 2
+        assert cache.stats["memory_size"] == 2
 
         count = await cache.clear()
 
         assert count == 2
-        assert cache.stats["size"] == 0
+        assert cache.stats["memory_size"] == 0
         assert await cache.get("m", "text1", False) is None
 
     @pytest.mark.asyncio
@@ -128,7 +128,7 @@ class TestLRUCache:
         # Cleanup should remove expired entries
         removed = await short_ttl_cache.cleanup_expired()
         assert removed == 2
-        assert short_ttl_cache.stats["size"] == 1
+        assert short_ttl_cache.stats["memory_size"] == 1
 
     @pytest.mark.asyncio
     async def test_concurrent_access(self, cache):
