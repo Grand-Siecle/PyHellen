@@ -1,7 +1,10 @@
 """Admin routes for token, model, and security management."""
 
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List, Optional, TYPE_CHECKING
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+
+if TYPE_CHECKING:
+    from app.core.model_manager import ModelManager
 
 from app.core.security import (
     AuthManager,
@@ -51,6 +54,12 @@ def get_request_log_repo() -> RequestLogRepository:
 def get_metrics_repo() -> MetricsRepository:
     """Get MetricsRepository instance."""
     return MetricsRepository()
+
+
+def get_model_manager() -> "ModelManager":
+    """Get ModelManager instance (lazy import to avoid circular imports)."""
+    from app.core.model_manager import model_manager
+    return model_manager
 
 
 # ============================================
@@ -368,7 +377,8 @@ async def get_model_statistics(
 async def get_model(
     code: str,
     _: Optional[Token] = Depends(require_admin),
-    model_repo: ModelRepository = Depends(get_model_repo)
+    model_repo: ModelRepository = Depends(get_model_repo),
+    mgr: "ModelManager" = Depends(get_model_manager)
 ):
     """
     Get detailed information about a specific model.
@@ -386,16 +396,14 @@ async def get_model(
     total_size = sum(f.size_bytes or 0 for f in files if f.is_downloaded)
 
     # Get runtime info from model_manager
-    from app.core.model_manager import model_manager
-
-    model_status = model_manager.get_model_status(code)
-    device = model_manager.device
-    has_custom_processor = code in model_manager.iterator_processors
+    model_status = mgr.get_model_status(code)
+    device = mgr.device
+    has_custom_processor = code in mgr.iterator_processors
 
     # Get metrics
     metrics = None
-    if model_manager._metrics and code in model_manager._metrics.models:
-        metrics = model_manager._metrics.models[code].to_dict()
+    if mgr._metrics and code in mgr._metrics.models:
+        metrics = mgr._metrics.models[code].to_dict()
 
     return ModelDetailInfo(
         id=model.id,
@@ -488,10 +496,10 @@ async def create_model(
         )
 
     except Exception as e:
-        logger.error(f"Error creating model: {e}")
+        logger.error(f"Error creating model: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create model"
+            detail=f"Failed to create model: {type(e).__name__}"
         )
 
 
@@ -646,12 +654,14 @@ async def deactivate_model(
     code: str,
     current_token: Optional[Token] = Depends(require_admin),
     model_repo: ModelRepository = Depends(get_model_repo),
-    audit_repo: AuditRepository = Depends(get_audit_repo)
+    audit_repo: AuditRepository = Depends(get_audit_repo),
+    mgr: "ModelManager" = Depends(get_model_manager)
 ):
     """
     Deactivate a model.
 
     Requires admin privileges. Deactivated models cannot be used for tagging.
+    The model will be unloaded from memory if currently loaded.
     """
     model = model_repo.get_by_code(code)
     if not model:
@@ -666,12 +676,13 @@ async def deactivate_model(
             detail=f"Model '{code}' is already inactive"
         )
 
+    # Deactivate in database first (prevents new requests)
     model_repo.deactivate(code)
 
-    # Unload from memory if loaded
-    from app.core.model_manager import model_manager
-    if code in model_manager.taggers:
-        await model_manager.unload_model(code)
+    # Then unload from memory if loaded (existing requests will complete)
+    if code in mgr.taggers:
+        await mgr.unload_model(code)
+        logger.info(f"Unloaded model '{code}' from memory after deactivation")
 
     # Audit log
     audit_repo.log(
@@ -747,9 +758,9 @@ async def add_model_file(
 
 @router.get("/audit")
 async def get_audit_log(
-    limit: int = 100,
-    offset: int = 0,
-    action: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of entries to return"),
+    offset: int = Query(0, ge=0, description="Number of entries to skip"),
+    action: Optional[str] = Query(None, description="Filter by action type"),
     _: Optional[Token] = Depends(require_admin),
     audit_repo: AuditRepository = Depends(get_audit_repo)
 ):
@@ -757,11 +768,6 @@ async def get_audit_log(
     Get audit log entries.
 
     Requires admin privileges.
-
-    Args:
-        limit: Maximum number of entries to return
-        offset: Number of entries to skip
-        action: Filter by action type
     """
     if action:
         entries = audit_repo.get_by_action(action, limit=limit)
@@ -789,7 +795,7 @@ async def get_audit_log(
 
 @router.get("/audit/stats")
 async def get_audit_statistics(
-    hours: int = 24,
+    hours: int = Query(24, ge=1, le=8760, description="Number of hours to look back (max 1 year)"),
     _: Optional[Token] = Depends(require_admin),
     audit_repo: AuditRepository = Depends(get_audit_repo)
 ):
@@ -797,16 +803,13 @@ async def get_audit_statistics(
     Get audit statistics.
 
     Requires admin privileges.
-
-    Args:
-        hours: Number of hours to look back
     """
     return audit_repo.get_statistics(hours=hours)
 
 
 @router.post("/audit/cleanup")
 async def cleanup_audit_log(
-    days: int = 90,
+    days: int = Query(90, ge=1, le=365, description="Remove entries older than this many days"),
     _: Optional[Token] = Depends(require_admin),
     audit_repo: AuditRepository = Depends(get_audit_repo)
 ):
@@ -814,9 +817,6 @@ async def cleanup_audit_log(
     Clean up old audit log entries.
 
     Requires admin privileges.
-
-    Args:
-        days: Remove entries older than this many days
     """
     count = audit_repo.cleanup(days=days)
     return {"removed_entries": count, "message": f"Cleaned up {count} audit entries older than {days} days"}
@@ -828,9 +828,9 @@ async def cleanup_audit_log(
 
 @router.get("/requests")
 async def get_request_log(
-    limit: int = 100,
-    offset: int = 0,
-    model: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of entries to return"),
+    offset: int = Query(0, ge=0, description="Number of entries to skip"),
+    model: Optional[str] = Query(None, description="Filter by model code"),
     _: Optional[Token] = Depends(require_admin),
     request_log_repo: RequestLogRepository = Depends(get_request_log_repo)
 ):
@@ -838,14 +838,9 @@ async def get_request_log(
     Get request log entries.
 
     Requires admin privileges.
-
-    Args:
-        limit: Maximum number of entries to return
-        offset: Number of entries to skip
-        model: Filter by model code
     """
     if model:
-        entries = request_log_repo.get_by_model(model, limit=limit)
+        entries = request_log_repo.get_by_model(model, limit=limit, offset=offset)
     else:
         entries = request_log_repo.get_recent(limit=limit, offset=offset)
 
@@ -873,7 +868,7 @@ async def get_request_log(
 
 @router.get("/requests/stats")
 async def get_request_statistics(
-    hours: int = 24,
+    hours: int = Query(24, ge=1, le=8760, description="Number of hours to look back (max 1 year)"),
     _: Optional[Token] = Depends(require_admin),
     request_log_repo: RequestLogRepository = Depends(get_request_log_repo)
 ):
@@ -881,16 +876,13 @@ async def get_request_statistics(
     Get request statistics.
 
     Requires admin privileges.
-
-    Args:
-        hours: Number of hours to look back
     """
     return request_log_repo.get_statistics(hours=hours)
 
 
 @router.get("/requests/errors")
 async def get_request_errors(
-    limit: int = 100,
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of entries to return"),
     _: Optional[Token] = Depends(require_admin),
     request_log_repo: RequestLogRepository = Depends(get_request_log_repo)
 ):
@@ -920,7 +912,7 @@ async def get_request_errors(
 
 @router.post("/requests/cleanup")
 async def cleanup_request_log(
-    days: int = 30,
+    days: int = Query(30, ge=1, le=365, description="Remove entries older than this many days"),
     _: Optional[Token] = Depends(require_admin),
     request_log_repo: RequestLogRepository = Depends(get_request_log_repo)
 ):
@@ -928,9 +920,6 @@ async def cleanup_request_log(
     Clean up old request log entries.
 
     Requires admin privileges.
-
-    Args:
-        days: Remove entries older than this many days
     """
     count = request_log_repo.cleanup(days=days)
     return {"removed_entries": count, "message": f"Cleaned up {count} request log entries older than {days} days"}
