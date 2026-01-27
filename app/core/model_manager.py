@@ -1,4 +1,6 @@
 from typing import Dict, Optional, List, Union, Callable, Tuple, AsyncIterator, Any
+from dataclasses import dataclass, field
+from datetime import datetime
 import asyncio
 import concurrent.futures
 import functools
@@ -6,13 +8,100 @@ import importlib
 import json
 import os
 import time
-import requests
+
+import httpx
 from pie_extended.cli.utils import get_model, get_tagger
 from fastapi import HTTPException
 
 from app.core.utils import get_path_models, get_device, get_n_workers
 from app.core.logger import logger
+from app.core.settings import settings
 from app.schemas.nlp import PieLanguage, ModelStatusSchema
+
+
+@dataclass
+class ModelMetrics:
+    """
+    Metrics for tracking a single model's performance and usage.
+
+    Attributes:
+        load_count: Number of times the model has been loaded
+        load_time_total_ms: Total time spent loading the model
+        last_loaded_at: Timestamp of the last load
+        process_count: Number of texts processed
+        process_time_total_ms: Total processing time
+        last_used_at: Timestamp of the last usage
+        download_count: Number of download attempts
+        download_time_total_ms: Total download time
+        download_size_bytes: Total bytes downloaded
+        error_count: Number of errors encountered
+    """
+    load_count: int = 0
+    load_time_total_ms: float = 0.0
+    last_loaded_at: Optional[datetime] = None
+    process_count: int = 0
+    process_time_total_ms: float = 0.0
+    last_used_at: Optional[datetime] = None
+    download_count: int = 0
+    download_time_total_ms: float = 0.0
+    download_size_bytes: int = 0
+    error_count: int = 0
+
+    @property
+    def avg_load_time_ms(self) -> float:
+        """Average model load time in milliseconds."""
+        return self.load_time_total_ms / self.load_count if self.load_count > 0 else 0.0
+
+    @property
+    def avg_process_time_ms(self) -> float:
+        """Average text processing time in milliseconds."""
+        return self.process_time_total_ms / self.process_count if self.process_count > 0 else 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert metrics to a dictionary for JSON serialization."""
+        return {
+            "load_count": self.load_count,
+            "avg_load_time_ms": round(self.avg_load_time_ms, 2),
+            "last_loaded_at": self.last_loaded_at.isoformat() if self.last_loaded_at else None,
+            "process_count": self.process_count,
+            "avg_process_time_ms": round(self.avg_process_time_ms, 2),
+            "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
+            "download_count": self.download_count,
+            "download_size_mb": round(self.download_size_bytes / (1024 * 1024), 2),
+            "error_count": self.error_count
+        }
+
+
+@dataclass
+class GlobalMetrics:
+    """
+    Global metrics for the ModelManager instance.
+
+    Tracks overall application performance including uptime,
+    total requests, errors, and per-model metrics.
+    """
+    started_at: datetime = field(default_factory=datetime.now)
+    total_requests: int = 0
+    total_errors: int = 0
+    models: Dict[str, ModelMetrics] = field(default_factory=dict)
+
+    def get_model_metrics(self, model_name: str) -> ModelMetrics:
+        """Get or create metrics for a specific model."""
+        if model_name not in self.models:
+            self.models[model_name] = ModelMetrics()
+        return self.models[model_name]
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert all metrics to a dictionary for JSON serialization."""
+        uptime = (datetime.now() - self.started_at).total_seconds()
+        return {
+            "started_at": self.started_at.isoformat(),
+            "uptime_seconds": round(uptime, 2),
+            "total_requests": self.total_requests,
+            "total_errors": self.total_errors,
+            "requests_per_minute": round(self.total_requests / (uptime / 60), 2) if uptime > 0 else 0,
+            "models": {name: m.to_dict() for name, m in self.models.items()}
+        }
 
 
 class ModelManager:
@@ -28,7 +117,10 @@ class ModelManager:
         self.is_downloading: Dict[str, bool] = {}
         self.models: Dict[str, Any] = {}  # For backwards compatibility
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=get_n_workers())
-        self._processing_semaphore = asyncio.Semaphore(10)  # Limit concurrent processing
+        self._processing_semaphore = asyncio.Semaphore(settings.max_concurrent_processing)
+        self._http_client: Optional[httpx.AsyncClient] = None
+        self._metrics = GlobalMetrics() if settings.enable_metrics else None
+        self._shutdown_event = asyncio.Event()
         logger.info(f"ModelManager initialized with device: {self.device}")
 
     @property
@@ -38,13 +130,39 @@ class ModelManager:
 
     @property
     def batch_size(self) -> int:
-        """Batch size"""
-        return getattr(self, "_batch_size", 256)
+        """Batch size for model processing."""
+        return getattr(self, "_batch_size", settings.batch_size)
 
     @batch_size.setter
     def batch_size(self, value: int):
-        """Batch size check error"""
+        """Set batch size with minimum value validation."""
         self._batch_size = max(1, value)
+
+    @property
+    def metrics(self) -> Optional[Dict[str, Any]]:
+        """
+        Get current metrics as a dictionary.
+
+        Returns:
+            Dictionary containing all metrics, or None if metrics are disabled.
+        """
+        if self._metrics is None:
+            return None
+        return self._metrics.to_dict()
+
+    async def _get_http_client(self) -> httpx.AsyncClient:
+        """
+        Get or create the async HTTP client for downloads.
+
+        Returns:
+            An active httpx.AsyncClient instance.
+        """
+        if self._http_client is None or self._http_client.is_closed:
+            self._http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(settings.download_timeout_seconds),
+                follow_redirects=True
+            )
+        return self._http_client
 
     def get_model_status(self, model_name: str) -> str:
         """
@@ -109,32 +227,104 @@ class ModelManager:
         except Exception:
             return None
 
-    async def task_download(self, url: str, filename: str):
+    async def _download_file_async(
+        self,
+        url: str,
+        filename: str,
+        model_name: str
+    ) -> int:
         """
-        Efficiently download a file in chunks without Rich progress feedback.
+        Asynchronously download a file with retry logic and cleanup on failure.
+
+        Args:
+            url: URL to download from
+            filename: Local path to save the file
+            model_name: Name of the model (for metrics tracking)
+
+        Returns:
+            Number of bytes downloaded
+
+        Raises:
+            RuntimeError: If download fails after all retry attempts
+            asyncio.CancelledError: If shutdown is requested during download
         """
-        response = requests.get(url, stream=True)
-        total = int(response.headers.get('content-length', 0))
+        client = await self._get_http_client()
+        total_bytes = 0
+        last_error = None
 
-        if total == 0:
-            raise RuntimeError(f"Failed to retrieve content length for {url}")
+        for attempt in range(settings.download_max_retries):
+            try:
+                # Clean up partial file from previous attempt
+                if os.path.exists(filename) and attempt > 0:
+                    os.remove(filename)
 
-        logger.info(f"Downloading {filename} ({total / (1024 * 1024):.2f} MB)...")
+                async with client.stream("GET", url) as response:
+                    response.raise_for_status()
+                    total = int(response.headers.get('content-length', 0))
 
-        with open(filename, 'wb') as f:
-            downloaded = 0
-            for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    progress = (downloaded / total) * 100
-                    logger.info(f"Progress: {progress:.1f}%")
+                    if total == 0:
+                        raise RuntimeError(f"Failed to retrieve content length for {url}")
 
-        logger.info(f"✅ {filename} downloaded successfully.")
+                    logger.info(f"Downloading {os.path.basename(filename)} ({total / (1024 * 1024):.2f} MB)...")
+
+                    with open(filename, 'wb') as f:
+                        downloaded = 0
+                        last_progress = 0
+                        async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
+                            if self._shutdown_event.is_set():
+                                raise asyncio.CancelledError("Shutdown requested")
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            progress = int((downloaded / total) * 100)
+                            # Log progress every 20%
+                            if progress >= last_progress + 20:
+                                logger.info(f"Progress: {progress}%")
+                                last_progress = progress
+
+                    total_bytes = downloaded
+                    logger.info(f"✅ {os.path.basename(filename)} downloaded successfully.")
+                    return total_bytes
+
+            except httpx.TimeoutException as e:
+                last_error = e
+                logger.warning(f"⚠️ Timeout downloading {url} (attempt {attempt + 1}/{settings.download_max_retries})")
+            except httpx.HTTPStatusError as e:
+                last_error = e
+                logger.warning(f"⚠️ HTTP error {e.response.status_code} for {url} (attempt {attempt + 1}/{settings.download_max_retries})")
+            except asyncio.CancelledError:
+                # Clean up partial file on cancellation
+                if os.path.exists(filename):
+                    os.remove(filename)
+                raise
+            except Exception as e:
+                last_error = e
+                logger.warning(f"⚠️ Error downloading {url}: {e} (attempt {attempt + 1}/{settings.download_max_retries})")
+
+            # Exponential backoff before retry
+            if attempt < settings.download_max_retries - 1:
+                await asyncio.sleep(2 ** attempt)
+
+        # Clean up partial file after all retries failed
+        if os.path.exists(filename):
+            os.remove(filename)
+
+        if self._metrics:
+            self._metrics.get_model_metrics(model_name).error_count += 1
+
+        raise RuntimeError(f"Failed to download {url} after {settings.download_max_retries} attempts: {last_error}")
 
     async def download_model(self, module: str) -> bool:
         """
         Download model files for the specified module.
+
+        Uses async HTTP client with retry logic and metrics tracking.
+        Ensures only one download per model at a time via locking.
+
+        Args:
+            module: Name of the model module to download
+
+        Returns:
+            True if download succeeded, False otherwise
         """
         if self.download_locks.get(module) is None:
             self.download_locks[module] = asyncio.Lock()
@@ -143,6 +333,8 @@ class ModelManager:
             if self.is_downloading.get(module, False):
                 logger.warning(f"⚠️ Download for '{module}' already in progress...")
                 return False
+
+            start_time = time.time()
 
             try:
                 self.is_downloading[module] = True
@@ -153,25 +345,38 @@ class ModelManager:
                 if not hasattr(module_info, 'DOWNLOADS') or not module_info.DOWNLOADS:
                     raise ValueError(f"No files available for download in module '{module}'")
 
-                import os
                 os.makedirs(get_path_models(module, ""), exist_ok=True)
 
                 total_files = len(module_info.DOWNLOADS)
                 logger.info(f"Starting download of {total_files} files for module '{module}'...")
 
+                total_bytes = 0
                 downloaded_files = []
                 for file in module_info.DOWNLOADS:
                     file_path = get_path_models(module, file.name)
                     logger.info(f"→ Downloading: {file.name}")
 
-                    await self.task_download(file.url, file_path)
+                    bytes_downloaded = await self._download_file_async(file.url, file_path, module)
+                    total_bytes += bytes_downloaded
                     downloaded_files.append(file.name)
 
-                logger.info(f"✅ Download completed: {', '.join(downloaded_files)}")
+                download_time = (time.time() - start_time) * 1000
+
+                # Update metrics
+                if self._metrics:
+                    metrics = self._metrics.get_model_metrics(module)
+                    metrics.download_count += 1
+                    metrics.download_time_total_ms += download_time
+                    metrics.download_size_bytes += total_bytes
+
+                logger.info(f"✅ Download completed: {', '.join(downloaded_files)} ({download_time:.0f}ms)")
                 return True
 
             except Exception as e:
                 logger.error(f"❌ Error downloading module '{module}': {e}")
+                if self._metrics:
+                    self._metrics.get_model_metrics(module).error_count += 1
+                    self._metrics.total_errors += 1
                 return False
 
             finally:
@@ -181,9 +386,21 @@ class ModelManager:
         """
         Get a loaded tagger or load it if not already loaded.
         If not available locally, download it first.
+
+        Args:
+            module: Name of the model module to load
+
+        Returns:
+            The loaded tagger instance
+
+        Raises:
+            RuntimeError: If model is not available or fails to load
         """
         # Check if already loaded
         if module in self.taggers and self.taggers[module]:
+            # Update last used timestamp
+            if self._metrics:
+                self._metrics.get_model_metrics(module).last_used_at = datetime.now()
             return self.taggers[module]
 
         # Wait if currently downloading
@@ -191,6 +408,8 @@ class ModelManager:
             logger.warning(f"⏳ Model '{module}' is currently being downloaded...")
             while self.is_downloading.get(module, False):
                 await asyncio.sleep(1)
+
+        start_time = time.time()
 
         # Try to load the model
         try:
@@ -203,9 +422,9 @@ class ModelManager:
 
             model_path = get_path_models(module, "")
 
-            # Check if model neet to be downloading
+            # Check if model needs to be downloaded
             if not self._check_model_files_exist(module, model_path):
-                logger.warning(f"⚠️ Model files for '{module}' not found at {model_path}. Attempting to download...")
+                logger.warning(f"⚠️ Model files for '{module}' not found at {model_path}. Downloading...")
                 success = await self.download_model(module)
                 if not success:
                     raise RuntimeError(f"Failed to download model '{module}'")
@@ -239,31 +458,74 @@ class ModelManager:
 
             # Store the loaded tagger
             self.taggers[module] = tagger
+
+            # Update metrics
+            load_time = (time.time() - start_time) * 1000
+            if self._metrics:
+                metrics = self._metrics.get_model_metrics(module)
+                metrics.load_count += 1
+                metrics.load_time_total_ms += load_time
+                metrics.last_loaded_at = datetime.now()
+                metrics.last_used_at = datetime.now()
+
+            logger.info(f"✅ Model '{module}' loaded in {load_time:.0f}ms")
             return tagger
 
         except Exception as e:
             logger.error(f"❌ Error loading model '{module}': {str(e)}")
+            if self._metrics:
+                self._metrics.get_model_metrics(module).error_count += 1
+                self._metrics.total_errors += 1
             raise RuntimeError(f"Failed to load model '{module}': {str(e)}")
 
     def process_text(self, model_name: str, tagger, text: str, lower: bool = False) -> List[Dict]:
         """
         Process text with the given tagger using the appropriate iterator and processor.
+
+        Args:
+            model_name: Name of the model being used
+            tagger: The tagger instance
+            text: Text to process
+            lower: Whether to lowercase the text before processing
+
+        Returns:
+            List of dictionaries containing tagged tokens
         """
+        start_time = time.time()
+
         if lower:
             text = text.lower()
 
-        # Get the appropriate iterator and processor if available
-        if model_name in self.iterator_processors and self.iterator_processors[model_name]:
-            try:
-                iterator, processor = self.iterator_processors[model_name]()
-                return tagger.tag_str(text, iterator=iterator, processor=processor)
-            except Exception as e:
-                logger.error(f"❌ Error using custom iterator/processor for '{model_name}': {e}")
-                # Fall back to default tagging if custom iterator/processor fails
-                return tagger.tag(text)
-        else:
-            # Use default tagging method if no custom iterator/processor is available
-            return tagger.tag(text)
+        try:
+            # Get the appropriate iterator and processor if available
+            if model_name in self.iterator_processors and self.iterator_processors[model_name]:
+                try:
+                    iterator, processor = self.iterator_processors[model_name]()
+                    result = tagger.tag_str(text, iterator=iterator, processor=processor)
+                except Exception as e:
+                    logger.error(f"❌ Error using custom iterator/processor for '{model_name}': {e}")
+                    # Fall back to default tagging if custom iterator/processor fails
+                    result = tagger.tag(text)
+            else:
+                # Use default tagging method if no custom iterator/processor is available
+                result = tagger.tag(text)
+
+            # Update metrics
+            if self._metrics:
+                process_time = (time.time() - start_time) * 1000
+                metrics = self._metrics.get_model_metrics(model_name)
+                metrics.process_count += 1
+                metrics.process_time_total_ms += process_time
+                metrics.last_used_at = datetime.now()
+                self._metrics.total_requests += 1
+
+            return result
+
+        except Exception as e:
+            if self._metrics:
+                self._metrics.get_model_metrics(model_name).error_count += 1
+                self._metrics.total_errors += 1
+            raise
 
     async def stream_process(self, model_name: str, texts: List[str], lower: bool = False):
         """
@@ -480,11 +742,68 @@ class ModelManager:
             # Check if iterator/processor is available
             info["has_custom_processor"] = model_name in self.iterator_processors
 
+            # Add metrics if available
+            if self._metrics and model_name in self._metrics.models:
+                info["metrics"] = self._metrics.models[model_name].to_dict()
+
             return info
 
         except Exception as e:
             logger.error(f"Error getting model info for '{model_name}': {e}")
             return None
+
+    async def unload_model(self, model_name: str) -> bool:
+        """
+        Unload a model from memory to free resources.
+
+        Args:
+            model_name: Name of the model to unload
+
+        Returns:
+            True if model was unloaded, False if model was not loaded
+        """
+        if model_name not in self.taggers:
+            logger.warning(f"Model '{model_name}' is not loaded")
+            return False
+
+        try:
+            del self.taggers[model_name]
+            if model_name in self.iterator_processors:
+                del self.iterator_processors[model_name]
+            logger.info(f"✅ Model '{model_name}' unloaded from memory")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error unloading model '{model_name}': {e}")
+            return False
+
+    async def shutdown(self):
+        """
+        Gracefully shutdown the ModelManager.
+
+        Closes HTTP client, shuts down thread pool executor,
+        clears all loaded models, and logs final metrics.
+        """
+        logger.info("🛑 Shutting down ModelManager...")
+        self._shutdown_event.set()
+
+        # Close HTTP client
+        if self._http_client and not self._http_client.is_closed:
+            await self._http_client.aclose()
+            logger.info("HTTP client closed")
+
+        # Shutdown executor (wait for pending tasks)
+        self._executor.shutdown(wait=True, cancel_futures=False)
+        logger.info("Thread pool executor shut down")
+
+        # Clear models
+        self.taggers.clear()
+        self.iterator_processors.clear()
+
+        # Log final metrics
+        if self._metrics:
+            logger.info(f"Final metrics: {self._metrics.total_requests} requests, {self._metrics.total_errors} errors")
+
+        logger.info("✅ ModelManager shutdown complete")
 
 
 model_manager = ModelManager()
