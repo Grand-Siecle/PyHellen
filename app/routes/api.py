@@ -1,16 +1,25 @@
+"""NLP API routes with optional authentication and secure error handling."""
+
 from typing import List, Dict, Optional, Any
 import time
-from fastapi import APIRouter, HTTPException, Request, Query
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.nlp import SupportedLanguages, PieLanguage
 from app.core.model_manager import model_manager
 from app.core.cache import cache
 from app.core.logger import logger
+from app.core.security import require_auth, require_admin, Token, TokenScope
+from app.core.security.auth import require_scope
+from app.core.security.middleware import validate_model_name, get_allowed_models
 
 router = APIRouter()
 
+
+# ===================
+# Request/Response Models
+# ===================
 
 class TextInput(BaseModel):
     """Input model for single text tagging."""
@@ -66,6 +75,30 @@ class ModelInfoResponse(BaseModel):
     has_custom_processor: bool
 
 
+# ===================
+# Helper Functions
+# ===================
+
+def _validate_model(model: str) -> str:
+    """Validate model name against allowed models."""
+    allowed = get_allowed_models()
+    return validate_model_name(model, allowed)
+
+
+def _handle_processing_error(model: str, error: Exception) -> None:
+    """Log error and raise appropriate HTTP exception."""
+    logger.error(f"Error processing with model '{model}': {type(error).__name__}: {str(error)}")
+    # Don't expose internal error details to client
+    raise HTTPException(
+        status_code=500,
+        detail="An error occurred while processing the request"
+    )
+
+
+# ===================
+# Public Endpoints (no auth or read scope)
+# ===================
+
 @router.get("/languages", response_model=SupportedLanguages)
 async def get_languages():
     """
@@ -73,11 +106,6 @@ async def get_languages():
 
     **Returns**:
     - **200**: A JSON object with a list of supported language codes.
-
-    **Example**:
-    ```bash
-    curl -X GET http://{address}/api/languages
-    ```
     """
     languages = list(PieLanguage)
     return {"languages": languages}
@@ -87,7 +115,8 @@ async def get_languages():
 async def tag_text_get(
     model: str,
     text: str = Query(..., min_length=1, max_length=10000, description="Text to process"),
-    lower: bool = Query(False, description="Lowercase text before processing")
+    lower: bool = Query(False, description="Lowercase text before processing"),
+    _: Optional[Token] = Depends(require_auth)
 ):
     """
     Tag text using GET request (for simple queries).
@@ -97,14 +126,10 @@ async def tag_text_get(
     - **text**: Query parameter with the text to analyze
     - **lower**: Optional query parameter to lowercase text
 
-    **Returns**:
-    - **200**: A JSON object with the tagging results
-
-    **Example**:
-    ```bash
-    curl "http://{address}/api/tag/lasla?text=Lorem%20ipsum&lower=true"
-    ```
+    **Requires**: `read` scope if authentication is enabled.
     """
+    # Validate model name
+    model = _validate_model(model)
     start_time = time.time()
 
     try:
@@ -121,7 +146,7 @@ async def tag_text_get(
 
         tagger = await model_manager.get_or_load_model(model)
         if not tagger:
-            raise HTTPException(status_code=500, detail=f"Failed to load tagger for model '{model}'")
+            raise HTTPException(status_code=500, detail=f"Failed to load model '{model}'")
 
         result = model_manager.process_text(model, tagger, text, lower)
 
@@ -139,31 +164,25 @@ async def tag_text_get(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error processing text with model '{model}': {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        _handle_processing_error(model, e)
 
 
 @router.post("/tag/{model}", response_model=TagResponse)
-async def tag_text(model: str, input_data: TextInput):
+async def tag_text(
+    model: str,
+    input_data: TextInput,
+    _: Optional[Token] = Depends(require_auth)
+):
     """
     Tag text using the specified model.
 
     This endpoint processes a single text input and returns the analysis results.
     If the model is not loaded, it will be downloaded automatically.
 
-    **Parameters**:
-    - **model**: The name of the model to use (e.g., "lasla", "grc")
-    - **input_data**: JSON object containing the text to analyze and processing options
-
-    **Returns**:
-    - **200**: A JSON object with the tagging results
-    - **500**: If model loading or processing fails
-
-    **Example**:
-    ```bash
-    curl -X POST http://{address}/api/tag/lasla -H "Content-Type: application/json" -d '{"text": "Lorem ipsum", "lower": true}'
-    ```
+    **Requires**: `read` scope if authentication is enabled.
     """
+    # Validate model name
+    model = _validate_model(model)
     start_time = time.time()
 
     try:
@@ -180,7 +199,7 @@ async def tag_text(model: str, input_data: TextInput):
 
         tagger = await model_manager.get_or_load_model(model)
         if not tagger:
-            raise HTTPException(status_code=500, detail=f"Failed to load tagger for model '{model}'")
+            raise HTTPException(status_code=500, detail=f"Failed to load model '{model}'")
 
         result = model_manager.process_text(model, tagger, input_data.text, input_data.lower)
 
@@ -198,36 +217,26 @@ async def tag_text(model: str, input_data: TextInput):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error processing text with model '{model}': {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        _handle_processing_error(model, e)
 
 
 @router.post("/batch/{model}", response_model=BatchResponse)
 async def batch_process(
     model: str,
     batch_data: BatchTextInput,
-    concurrent: bool = Query(True, description="Use concurrent processing for better performance")
+    concurrent: bool = Query(True, description="Use concurrent processing for better performance"),
+    _: Optional[Token] = Depends(require_auth)
 ):
     """
     Process multiple texts using the specified model.
 
-    This endpoint handles batch processing of multiple text inputs and returns all results together.
+    This endpoint handles batch processing of multiple text inputs.
     Uses concurrent processing by default for better performance.
 
-    **Parameters**:
-    - **model**: The name of the model to use
-    - **batch_data**: JSON object containing a list of texts and processing options
-    - **concurrent**: Query param to enable/disable concurrent processing (default: true)
-
-    **Returns**:
-    - **200**: A JSON object with results for all texts
-    - **500**: If model loading or processing fails
-
-    **Example**:
-    ```bash
-    curl -X POST "http://{address}/api/batch/lasla?concurrent=true" -H "Content-Type: application/json" -d '{"texts": ["Text 1", "Text 2"], "lower": false}'
-    ```
+    **Requires**: `read` scope if authentication is enabled.
     """
+    # Validate model name
+    model = _validate_model(model)
     start_time = time.time()
     cache_hits = 0
 
@@ -236,7 +245,7 @@ async def batch_process(
             # Check cache first to count hits for this request
             tagger = await model_manager.get_or_load_model(model)
             if not tagger:
-                raise HTTPException(status_code=500, detail=f"Failed to load tagger for model '{model}'")
+                raise HTTPException(status_code=500, detail=f"Failed to load model '{model}'")
 
             results = [None] * len(batch_data.texts)
             texts_to_process = []
@@ -270,7 +279,7 @@ async def batch_process(
             # Fall back to sequential processing
             tagger = await model_manager.get_or_load_model(model)
             if not tagger:
-                raise HTTPException(status_code=500, detail=f"Failed to load tagger for model '{model}'")
+                raise HTTPException(status_code=500, detail=f"Failed to load model '{model}'")
 
             results = []
             for text in batch_data.texts:
@@ -297,44 +306,33 @@ async def batch_process(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error processing batch with model '{model}': {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        _handle_processing_error(model, e)
 
 
 @router.post("/stream/{model}")
 async def stream_process(
     model: str,
     batch_data: BatchTextInput,
-    format: str = Query("ndjson", description="Output format: 'ndjson' (default), 'sse', or 'plain'")
+    format: str = Query("ndjson", description="Output format: 'ndjson' (default), 'sse', or 'plain'"),
+    _: Optional[Token] = Depends(require_auth)
 ):
     """
     Stream process multiple texts using the specified model.
 
-    This endpoint processes texts and streams the results back as they become available.
     Supports multiple output formats:
-    - **ndjson**: Newline Delimited JSON (default) - each line is a JSON object
-    - **sse**: Server-Sent Events - for real-time web applications
-    - **plain**: Simple text stream (legacy format)
+    - **ndjson**: Newline Delimited JSON (default)
+    - **sse**: Server-Sent Events for real-time web applications
+    - **plain**: Simple text stream
 
-    **Parameters**:
-    - **model**: The name of the model to use
-    - **batch_data**: JSON object containing a list of texts and processing options
-    - **format**: Output format query parameter
-
-    **Returns**:
-    - **200**: A stream with processing results in the specified format
-    - **500**: If model loading or processing fails
-
-    **Example (NDJSON)**:
-    ```bash
-    curl -X POST "http://{address}/api/stream/lasla?format=ndjson" -H "Content-Type: application/json" -d '{"texts": ["Text 1", "Text 2"]}'
-    ```
-
-    **Example (SSE)**:
-    ```bash
-    curl -X POST "http://{address}/api/stream/lasla?format=sse" -H "Content-Type: application/json" -d '{"texts": ["Text 1", "Text 2"]}'
-    ```
+    **Requires**: `read` scope if authentication is enabled.
     """
+    # Validate model name
+    model = _validate_model(model)
+
+    # Validate format
+    if format not in ("ndjson", "sse", "plain"):
+        raise HTTPException(status_code=400, detail="Invalid format. Use 'ndjson', 'sse', or 'plain'")
+
     try:
         if format == "sse":
             async def sse_generator():
@@ -345,7 +343,6 @@ async def stream_process(
                 sse_generator(),
                 media_type="text/event-stream",
                 headers={
-                    'Access-Control-Allow-Origin': "*",
                     'Cache-Control': 'no-cache',
                     'Connection': 'keep-alive'
                 }
@@ -359,7 +356,6 @@ async def stream_process(
                 ndjson_generator(),
                 media_type="application/x-ndjson",
                 headers={
-                    'Access-Control-Allow-Origin': "*",
                     'Cache-Control': 'no-cache'
                 }
             )
@@ -372,53 +368,40 @@ async def stream_process(
                 stream_generator(),
                 media_type="text/plain",
                 headers={
-                    'Access-Control-Allow-Origin': "*",
                     'Cache-Control': 'no-cache'
                 }
             )
 
     except Exception as e:
-        logger.error(f"Error streaming process with model '{model}': {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        _handle_processing_error(model, e)
 
+
+# ===================
+# Model Management Endpoints
+# ===================
 
 @router.get("/models")
-async def list_models():
+async def list_models(_: Optional[Token] = Depends(require_auth)):
     """
     Get the status of all available models.
 
-    This endpoint provides information about all supported language models,
-    including whether they are loaded, downloading, or not available.
-
-    **Returns**:
-    - **200**: A JSON object with model status information
-
-    **Example**:
-    ```bash
-    curl -X GET http://{address}/api/models
-    ```
+    **Requires**: `read` scope if authentication is enabled.
     """
     models_status = model_manager.get_all_models_status()
     return {"models": models_status}
 
 
 @router.get("/models/{model}")
-async def get_model_info(model: str):
+async def get_model_info(
+    model: str,
+    _: Optional[Token] = Depends(require_auth)
+):
     """
     Get detailed information about a specific model.
 
-    **Parameters**:
-    - **model**: The name of the model
-
-    **Returns**:
-    - **200**: Detailed model information
-    - **404**: If the model is not found
-
-    **Example**:
-    ```bash
-    curl -X GET http://{address}/api/models/lasla
-    ```
+    **Requires**: `read` scope if authentication is enabled.
     """
+    model = _validate_model(model)
     info = model_manager.get_model_info(model)
     if info is None:
         raise HTTPException(status_code=404, detail=f"Model '{model}' not found")
@@ -426,24 +409,19 @@ async def get_model_info(model: str):
 
 
 @router.post("/models/{model}/load")
-async def preload_model(model: str):
+async def preload_model(
+    model: str,
+    _: Optional[Token] = Depends(require_scope(TokenScope.WRITE))
+):
     """
     Preload a model into memory.
 
-    This endpoint loads the model immediately (downloading if needed) and keeps it ready for use.
+    This endpoint loads the model immediately (downloading if needed).
 
-    **Parameters**:
-    - **model**: The name of the model to preload
-
-    **Returns**:
-    - **200**: Model loaded successfully
-    - **500**: If loading fails
-
-    **Example**:
-    ```bash
-    curl -X POST http://{address}/api/models/lasla/load
-    ```
+    **Requires**: `write` scope if authentication is enabled.
     """
+    model = _validate_model(model)
+
     try:
         start_time = time.time()
         tagger = await model_manager.get_or_load_model(model)
@@ -457,102 +435,25 @@ async def preload_model(model: str):
             "load_time_ms": round(load_time, 2),
             "device": model_manager.device
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error preloading model '{model}': {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/cache/stats")
-async def get_cache_stats():
-    """
-    Get cache statistics.
-
-    **Returns**:
-    - **200**: Cache statistics including size, hit rate, etc.
-
-    **Example**:
-    ```bash
-    curl -X GET http://{address}/api/cache/stats
-    ```
-    """
-    return cache.stats
-
-
-@router.post("/cache/clear")
-async def clear_cache():
-    """
-    Clear all cached results.
-
-    **Returns**:
-    - **200**: Number of cleared entries
-
-    **Example**:
-    ```bash
-    curl -X POST http://{address}/api/cache/clear
-    ```
-    """
-    count = await cache.clear()
-    return {"cleared_entries": count, "message": "Cache cleared successfully"}
-
-
-@router.post("/cache/cleanup")
-async def cleanup_cache():
-    """
-    Remove expired entries from cache.
-
-    **Returns**:
-    - **200**: Number of removed entries
-
-    **Example**:
-    ```bash
-    curl -X POST http://{address}/api/cache/cleanup
-    ```
-    """
-    count = await cache.cleanup_expired()
-    return {"removed_entries": count, "message": "Expired entries cleaned up"}
-
-
-@router.get("/metrics")
-async def get_metrics():
-    """
-    Get performance metrics for the model manager.
-
-    Returns metrics including:
-    - Uptime and total requests
-    - Per-model statistics (load times, process times, error counts)
-    - Request rates
-
-    **Returns**:
-    - **200**: Metrics data or message if metrics are disabled
-
-    **Example**:
-    ```bash
-    curl -X GET http://{address}/api/metrics
-    ```
-    """
-    metrics = model_manager.metrics
-    if metrics is None:
-        return {"message": "Metrics collection is disabled"}
-    return metrics
+        logger.error(f"Error preloading model '{model}': {e}")
+        raise HTTPException(status_code=500, detail="Failed to load model")
 
 
 @router.post("/models/{model}/unload")
-async def unload_model(model: str):
+async def unload_model(
+    model: str,
+    _: Optional[Token] = Depends(require_scope(TokenScope.WRITE))
+):
     """
     Unload a model from memory to free resources.
 
-    **Parameters**:
-    - **model**: The name of the model to unload
-
-    **Returns**:
-    - **200**: Model unloaded successfully
-    - **404**: If the model is not loaded
-
-    **Example**:
-    ```bash
-    curl -X POST http://{address}/api/models/lasla/unload
-    ```
+    **Requires**: `write` scope if authentication is enabled.
     """
+    model = _validate_model(model)
+
     success = await model_manager.unload_model(model)
     if not success:
         raise HTTPException(status_code=404, detail=f"Model '{model}' is not loaded")
@@ -561,3 +462,59 @@ async def unload_model(model: str):
         "model": model,
         "message": f"Model '{model}' has been unloaded from memory"
     }
+
+
+# ===================
+# Cache Management (requires write scope)
+# ===================
+
+@router.get("/cache/stats")
+async def get_cache_stats(_: Optional[Token] = Depends(require_auth)):
+    """
+    Get cache statistics.
+
+    **Requires**: `read` scope if authentication is enabled.
+    """
+    return cache.stats
+
+
+@router.post("/cache/clear")
+async def clear_cache(_: Optional[Token] = Depends(require_scope(TokenScope.WRITE))):
+    """
+    Clear all cached results.
+
+    **Requires**: `write` scope if authentication is enabled.
+    """
+    count = await cache.clear()
+    logger.info(f"Cache cleared: {count} entries removed")
+    return {"cleared_entries": count, "message": "Cache cleared successfully"}
+
+
+@router.post("/cache/cleanup")
+async def cleanup_cache(_: Optional[Token] = Depends(require_scope(TokenScope.WRITE))):
+    """
+    Remove expired entries from cache.
+
+    **Requires**: `write` scope if authentication is enabled.
+    """
+    count = await cache.cleanup_expired()
+    return {"removed_entries": count, "message": "Expired entries cleaned up"}
+
+
+# ===================
+# Metrics (requires admin scope)
+# ===================
+
+@router.get("/metrics")
+async def get_metrics(_: Optional[Token] = Depends(require_admin)):
+    """
+    Get performance metrics for the model manager.
+
+    Returns metrics including uptime, request counts, and per-model statistics.
+
+    **Requires**: `admin` scope if authentication is enabled.
+    """
+    metrics = model_manager.metrics
+    if metrics is None:
+        return {"message": "Metrics collection is disabled"}
+    return metrics
