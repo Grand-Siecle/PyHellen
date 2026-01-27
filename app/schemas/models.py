@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class ModelBase(BaseModel):
@@ -34,13 +34,12 @@ class ModelInfo(ModelBase):
     pie_module: str
     is_active: bool
     is_builtin: bool
-    batch_size: Optional[int]
+    batch_size: Optional[int] = None
     priority: int
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class ModelFileInfo(BaseModel):
@@ -48,19 +47,20 @@ class ModelFileInfo(BaseModel):
     id: int
     filename: str
     url: str
-    size_bytes: Optional[int]
-    size_mb: Optional[float] = None
-    checksum: Optional[str]
+    size_bytes: Optional[int] = None
+    checksum: Optional[str] = None
     is_downloaded: bool
-    downloaded_at: Optional[datetime]
+    downloaded_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
-    def __init__(self, **data):
-        super().__init__(**data)
-        if self.size_bytes:
-            object.__setattr__(self, 'size_mb', round(self.size_bytes / (1024 * 1024), 2))
+    @computed_field
+    @property
+    def size_mb(self) -> Optional[float]:
+        """File size in megabytes, computed from size_bytes."""
+        if self.size_bytes is not None:
+            return round(self.size_bytes / (1024 * 1024), 2)
+        return None
 
 
 class ModelDetailInfo(ModelInfo):
