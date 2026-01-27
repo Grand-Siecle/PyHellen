@@ -87,12 +87,35 @@ def _validate_model(model: str) -> str:
 
 
 def _handle_processing_error(model: str, error: Exception) -> None:
-    """Log error and raise appropriate HTTP exception."""
-    logger.error(f"Error processing with model '{model}': {type(error).__name__}: {str(error)}")
-    # Don't expose internal error details to client
+    """Log error and raise appropriate HTTP exception based on error type."""
+    error_msg = str(error)
+    logger.error(f"Error processing with model '{model}': {type(error).__name__}: {error_msg}")
+
+    # Model not available or not found
+    if "not available" in error_msg.lower() or "not found" in error_msg.lower():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Model '{model}' is not available"
+        )
+
+    # Model failed to load (download failed, file missing, etc.)
+    if "failed to load" in error_msg.lower() or "failed to download" in error_msg.lower():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Model '{model}' could not be loaded. Please try again later."
+        )
+
+    # Runtime errors during processing (usually client input issues or model limitations)
+    if isinstance(error, (RuntimeError, ValueError)):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Processing failed: {error_msg}"
+        )
+
+    # Unexpected server errors
     raise HTTPException(
         status_code=500,
-        detail="An error occurred while processing the request"
+        detail="An unexpected error occurred while processing the request"
     )
 
 
@@ -159,7 +182,7 @@ async def tag_text_get(
 
         tagger = await model_manager.get_or_load_model(model)
         if not tagger:
-            raise HTTPException(status_code=500, detail=f"Failed to load model '{model}'")
+            raise HTTPException(status_code=503, detail=f"Model '{model}' could not be loaded")
 
         result = model_manager.process_text(model, tagger, text, lower)
 
@@ -212,7 +235,7 @@ async def tag_text(
 
         tagger = await model_manager.get_or_load_model(model)
         if not tagger:
-            raise HTTPException(status_code=500, detail=f"Failed to load model '{model}'")
+            raise HTTPException(status_code=503, detail=f"Model '{model}' could not be loaded")
 
         result = model_manager.process_text(model, tagger, input_data.text, input_data.lower)
 
@@ -258,7 +281,7 @@ async def batch_process(
             # Check cache first to count hits for this request
             tagger = await model_manager.get_or_load_model(model)
             if not tagger:
-                raise HTTPException(status_code=500, detail=f"Failed to load model '{model}'")
+                raise HTTPException(status_code=503, detail=f"Model '{model}' could not be loaded")
 
             results = [None] * len(batch_data.texts)
             texts_to_process = []
@@ -292,7 +315,7 @@ async def batch_process(
             # Fall back to sequential processing
             tagger = await model_manager.get_or_load_model(model)
             if not tagger:
-                raise HTTPException(status_code=500, detail=f"Failed to load model '{model}'")
+                raise HTTPException(status_code=503, detail=f"Model '{model}' could not be loaded")
 
             results = []
             for text in batch_data.texts:
@@ -439,7 +462,7 @@ async def preload_model(
         start_time = time.time()
         tagger = await model_manager.get_or_load_model(model)
         if not tagger:
-            raise HTTPException(status_code=500, detail=f"Failed to load model '{model}'")
+            raise HTTPException(status_code=503, detail=f"Model '{model}' could not be loaded")
 
         load_time = (time.time() - start_time) * 1000
         return {
