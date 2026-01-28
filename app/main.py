@@ -210,10 +210,16 @@ app = create_application()
 if __name__ == "__main__":
     import uvicorn
 
+    print("\n" + "=" * 60)
+    print("  DEVELOPMENT SERVER ONLY - NOT FOR PRODUCTION USE")
+    print("  For production, use:")
+    print("    gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker")
+    print("  Or run with Docker (see docs/docker.md)")
+    print("=" * 60 + "\n")
+
     uvicorn.run(
-        app,
-        host="0.0.0.0",
+        "app.main:app",
+        host="127.0.0.1",
         port=8000,
-        ssl_keyfile=os.environ.get("SSL_KEYFILE", None),
-        ssl_certfile=os.environ.get("SSL_CERTFILE", None)
+        reload=True,
     )
