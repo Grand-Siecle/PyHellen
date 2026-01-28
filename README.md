@@ -5,7 +5,7 @@
 [![Python 3.8-3.10](https://img.shields.io/badge/python-3.8--3.10-blue.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED.svg?logo=docker&logoColor=white)](https://ghcr.io/grand-siecle/pyhellen)
 
 FastAPI-based REST API providing access to historical linguistic taggers using [Pie Extended](https://github.com/hipster-philology/nlp-pie-taggers). Supports Classical Latin, Ancient Greek, Old French, Early Modern French, Classical French, Old Dutch, and Occitan.
