@@ -1,8 +1,9 @@
 git+https://github.com/hipster-philology/nlp-pie-taggers.git@master #pie extended
-typing~=3.7.4.3
-pydantic~=2.10.6
-fastapi~=0.115.11
-uvicorn~=0.34.0
-pydantic-settings~=2.8.1
-semver~=3.0.4
-httpx~=0.27.0
+typing-extensions>=4.14.1,<5.0
+fastapi~=0.128.0
+pydantic~=2.12.5
+pydantic-settings~=2.12.0
+uvicorn[standard]~=0.40.0
+httpx~=0.28.1
+sqlmodel~=0.0.31
+semver~=3.0.2
