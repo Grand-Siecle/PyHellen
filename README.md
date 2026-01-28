@@ -1,10 +1,12 @@
 # PyHellen - Historical Languages NLP API
 
-[![Python 3.8-3.10](https://img.shields.io/badge/python-3.8--3.10-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com)
+[![CI/CD](https://github.com/Grand-Siecle/PyHellen/actions/workflows/ci.yml/badge.svg)](https://github.com/Grand-Siecle/PyHellen/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/Grand-Siecle/PyHellen/branch/main/graph/badge.svg)](https://codecov.io/gh/Grand-Siecle/PyHellen)
+[![Python 3.8-3.10](https://img.shields.io/badge/python-3.8--3.10-blue.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Tests](https://img.shields.io/badge/tests-pytest-yellow.svg)](https://pytest.org)
+[![Docker](https://img.shields.io/badge/docker-ready-2496ED.svg?logo=docker&logoColor=white)](https://ghcr.io/grand-siecle/pyhellen)
 
 FastAPI-based REST API providing access to historical linguistic taggers using [Pie Extended](https://github.com/hipster-philology/nlp-pie-taggers). Supports Classical Latin, Ancient Greek, Old French, Early Modern French, Classical French, Old Dutch, and Occitan.
 
