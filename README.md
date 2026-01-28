@@ -4,11 +4,16 @@ FastAPI-based REST API providing access to historical linguistic taggers using [
 
 ## Features
 
-- **Multiple Languages**: 7 historical language models available
+- **Multiple Languages**: 7 built-in historical language models (can be activated/deactivated)
 - **High Performance**: Concurrent batch processing, LRU caching with TTL
 - **Streaming**: NDJSON and Server-Sent Events (SSE) formats
 - **GPU Support**: Automatic CUDA detection and utilization
 - **Production Ready**: Health checks, model preloading, comprehensive API
+- **Token Authentication**: Optional token-based security with scopes (read, write, admin)
+- **SQLite Database**: Persistent storage for models, tokens, cache, audit logs, and metrics
+- **Admin API**: Model activation/deactivation and token management
+- **Request Logging**: Track all API requests with detailed metrics
+- **Audit Trail**: Complete audit logging for security-sensitive operations
 
 ## Supported Languages
 
@@ -107,11 +112,11 @@ curl "http://localhost:8000/api/models"
 # Get detailed model info
 curl "http://localhost:8000/api/models/lasla"
 
-# Download a model
-curl -X POST "http://localhost:8000/api/models/lasla/download"
-
 # Preload a model into memory
 curl -X POST "http://localhost:8000/api/models/lasla/load"
+
+# Unload a model from memory
+curl -X POST "http://localhost:8000/api/models/lasla/unload"
 ```
 
 ### Cache Management
@@ -135,6 +140,33 @@ curl "http://localhost:8000/service/health"
 
 # Detailed status (GPU/CPU info)
 curl "http://localhost:8000/service/api/status"
+```
+
+### Admin API (requires admin token)
+
+```bash
+# Authentication status
+curl -H "Authorization: Bearer YOUR_TOKEN" "http://localhost:8000/admin/auth/status"
+
+# Token management
+curl -H "Authorization: Bearer YOUR_TOKEN" "http://localhost:8000/admin/tokens"
+curl -X POST -H "Authorization: Bearer YOUR_TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "my-app", "scopes": ["read"]}' \
+  "http://localhost:8000/admin/tokens"
+
+# Model management (activate/deactivate only)
+curl -H "Authorization: Bearer YOUR_TOKEN" "http://localhost:8000/admin/models"
+curl -X POST -H "Authorization: Bearer YOUR_TOKEN" "http://localhost:8000/admin/models/lasla/deactivate"
+curl -X POST -H "Authorization: Bearer YOUR_TOKEN" "http://localhost:8000/admin/models/lasla/activate"
+
+# Audit logs
+curl -H "Authorization: Bearer YOUR_TOKEN" "http://localhost:8000/admin/audit"
+
+# Request logs and statistics
+curl -H "Authorization: Bearer YOUR_TOKEN" "http://localhost:8000/admin/requests/stats"
+
+# Metrics
+curl -H "Authorization: Bearer YOUR_TOKEN" "http://localhost:8000/admin/metrics/persistent"
 ```
 
 ## Response Examples
@@ -230,6 +262,41 @@ async function processWithSSE(texts) {
 }
 ```
 
+## Authentication
+
+Authentication is **disabled by default**. To enable token-based authentication:
+
+1. Generate a secret key:
+   ```bash
+   python -c "import secrets; print(secrets.token_urlsafe(32))"
+   ```
+
+2. Configure `.env`:
+   ```bash
+   AUTH_ENABLED=true
+   SECRET_KEY="your-generated-secret-key"
+   ```
+
+3. On first run with `AUTO_CREATE_ADMIN_TOKEN=true`, an admin token is created and logged.
+
+### Token Scopes
+
+| Scope | Permissions |
+|-------|-------------|
+| `read` | Use tagging endpoints (GET/POST /api/tag, /api/batch, /api/stream) |
+| `write` | Modify cache, load/unload models |
+| `admin` | Full access including token management and model activation |
+
+### Using Tokens
+
+```bash
+# Via Authorization header (Bearer)
+curl -H "Authorization: Bearer YOUR_TOKEN" "http://localhost:8000/api/tag/lasla?text=..."
+
+# Via X-API-Key header
+curl -H "X-API-Key: YOUR_TOKEN" "http://localhost:8000/api/tag/lasla?text=..."
+```
+
 ## Testing
 
 ```bash
@@ -248,25 +315,82 @@ pytest tests/ --cov=app --cov-report=html
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
 | `DOWNLOAD_MODEL_PATH` | Path to store model files | `~/.local/share/pyhellen` |
-| `SSL_KEYFILE` | SSL key file path | None |
-| `SSL_CERTFILE` | SSL certificate path | None |
+| `PRELOAD_MODELS` | Models to preload at startup (comma-separated) | `""` |
+| **Security** | | |
+| `AUTH_ENABLED` | Enable token-based authentication | `false` |
+| `SECRET_KEY` | Secret key for token hashing (required if auth enabled) | `""` |
+| `TOKEN_DB_PATH` | Path to SQLite token database | `tokens.db` |
+| `AUTO_CREATE_ADMIN_TOKEN` | Auto-create admin token on first run | `true` |
+| **CORS** | | |
+| `CORS_ORIGINS` | Allowed origins (comma-separated, `*` for all) | `*` |
+| `CORS_ALLOW_CREDENTIALS` | Allow credentials in CORS | `false` |
+| **Rate Limiting** | | |
+| `RATE_LIMIT_ENABLED` | Enable rate limiting | `false` |
+| `RATE_LIMIT_REQUESTS` | Max requests per window | `100` |
+| `RATE_LIMIT_WINDOW_SECONDS` | Rate limit window | `60` |
+| **Processing** | | |
+| `MAX_CONCURRENT_PROCESSING` | Max concurrent processing tasks | `10` |
+| `BATCH_SIZE` | Batch size for model processing | `256` |
+| `DOWNLOAD_TIMEOUT_SECONDS` | Model download timeout | `300` |
+| `DOWNLOAD_MAX_RETRIES` | Download retry attempts | `3` |
+| **Metrics & Logging** | | |
+| `ENABLE_METRICS` | Enable metrics collection | `true` |
+| `LOG_LEVEL` | Log level (DEBUG, INFO, WARNING, ERROR) | `INFO` |
+| `LOG_FORMAT` | Log format (json, text, auto) | `auto` |
+| **SSL** | | |
+| `SSL_KEYFILE` | SSL key file path | `""` |
+| `SSL_CERTFILE` | SSL certificate path | `""` |
 
 ## Architecture
 
 ```
 app/
-├── main.py              # FastAPI app factory
+├── main.py                  # FastAPI app factory, lifespan manager
+├── constants.py             # Logger and path constants
 ├── core/
-│   ├── model_manager.py # Model lifecycle, concurrent processing
-│   ├── cache.py         # LRU cache with TTL
-│   ├── settings.py      # Configuration
-│   └── utils.py         # GPU/CPU detection
+│   ├── model_manager.py     # Model lifecycle, concurrent processing
+│   ├── cache.py             # LRU cache with TTL
+│   ├── settings.py          # Pydantic Settings configuration
+│   ├── environment.py       # PIE_EXTENDED_DOWNLOADS env setup
+│   ├── logger.py            # Logging configuration
+│   ├── utils.py             # GPU/CPU detection
+│   ├── database/            # SQLite database layer
+│   │   ├── engine.py        # Database engine and session
+│   │   ├── models.py        # SQLModel ORM models
+│   │   └── repositories/    # Data access layer
+│   │       ├── model_repo.py
+│   │       ├── token_repo.py
+│   │       ├── cache_repo.py
+│   │       ├── audit_repo.py
+│   │       ├── request_log_repo.py
+│   │       └── metrics_repo.py
+│   ├── security/            # Authentication system
+│   │   ├── auth.py          # AuthManager, dependencies
+│   │   ├── database.py      # Token database
+│   │   ├── models.py        # Token schemas
+│   │   └── middleware.py    # Security headers, validation
+│   └── middleware/
+│       └── request_logger.py # Request logging middleware
 ├── routes/
-│   ├── api.py           # NLP endpoints
-│   └── service.py       # Health endpoints
+│   ├── api.py               # NLP endpoints (/api/*)
+│   ├── admin.py             # Admin endpoints (/admin/*)
+│   └── service.py           # Health endpoints (/service/*)
 └── schemas/
-    ├── nlp.py           # NLP schemas
-    └── services.py      # Service schemas
+    ├── nlp.py               # NLP schemas
+    ├── models.py            # Model management schemas
+    └── services.py          # Service schemas
+
+tests/
+├── conftest.py              # Pytest fixtures
+├── test_api.py              # API endpoint tests
+├── test_admin.py            # Admin endpoint tests
+├── test_security.py         # Security tests
+├── test_database.py         # Database tests
+├── test_cache.py            # Cache tests
+├── test_settings.py         # Settings tests
+├── test_schemas.py          # Schema tests
+├── test_token_repo.py       # Token repository tests
+└── test_model_manager.py    # ModelManager tests
 ```
 
 ## License
