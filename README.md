@@ -1,5 +1,11 @@
 # PyHellen - Historical Languages NLP API
 
+[![Python 3.8-3.10](https://img.shields.io/badge/python-3.8--3.10-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Tests](https://img.shields.io/badge/tests-pytest-yellow.svg)](https://pytest.org)
+
 FastAPI-based REST API providing access to historical linguistic taggers using [Pie Extended](https://github.com/hipster-philology/nlp-pie-taggers). Supports Classical Latin, Ancient Greek, Old French, Early Modern French, Classical French, Old Dutch, and Occitan.
 
 ## Features
