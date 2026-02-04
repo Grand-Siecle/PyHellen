@@ -1,7 +1,9 @@
 version: '3.8'
 
 services:
+  # ===========================================
   # CPU version (default)
+  # ===========================================
   pyhellen:
     build:
       context: ..
@@ -11,15 +13,40 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ../app:/app/app
       - model_data:/data/models
     environment:
       - PIE_EXTENDED_DOWNLOADS=/data/models
       - PYTHONPATH=/app
       - USE_CUDA=0
+      - LOG_FORMAT=json
+      - LOG_LEVEL=INFO
     restart: unless-stopped
+    # Resource limits for production stability
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    # Health check configuration
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/service/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
+  # ===========================================
   # GPU version (requires Nvidia Container Toolkit)
+  # ===========================================
   pyhellen-gpu:
     build:
       context: ..
@@ -29,21 +56,98 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ../app:/app/app
       - model_data:/data/models
     environment:
       - PIE_EXTENDED_DOWNLOADS=/data/models
       - PYTHONPATH=/app
       - USE_CUDA=1
+      - LOG_FORMAT=json
+      - LOG_LEVEL=INFO
     deploy:
       resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
         reservations:
+          cpus: '1.0'
+          memory: 2G
           devices:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
     restart: unless-stopped
+    # Health check configuration
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/service/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===========================================
+  # Prometheus - Metrics collection
+  # ===========================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: pyhellen-prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    depends_on:
+      - pyhellen
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # Grafana - Metrics visualization
+  # ===========================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: pyhellen-grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3000}
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   model_data:
     driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  default:
+    name: pyhellen-network

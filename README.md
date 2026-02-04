@@ -1,132 +1,98 @@
-# PyHellen - NLP API with Pie models
+# PyHellen - Historical Languages NLP API
 
-This document describes the improved model management and streaming API for the PyHellen NLP service, which provides access to various historical linguistic taggers for multiple languages using Pie Extended.
+[![CI/CD](https://github.com/Grand-Siecle/PyHellen/actions/workflows/ci.yml/badge.svg)](https://github.com/Grand-Siecle/PyHellen/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/Grand-Siecle/PyHellen/branch/main/graph/badge.svg)](https://codecov.io/gh/Grand-Siecle/PyHellen)
+[![Python 3.8-3.10](https://img.shields.io/badge/python-3.8--3.10-blue.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/docker-ready-2496ED.svg?logo=docker&logoColor=white)](https://ghcr.io/grand-siecle/pyhellen)
 
-## Key Improvements
+REST API for historical linguistic tagging using [Pie Extended](https://github.com/hipster-philology/nlp-pie-taggers).
 
-1. **Enhanced Model Management**
-   - Centralized model manager singleton for better state management
-   - Proper integration with Pie Extended's `get_tagger` and iterator/processor pattern
-   - Improved download handling with proper locking mechanisms
-   - Status tracking for models
-   - Support for batch processing and streaming responses
+## Features
 
-2. **New API Endpoints**
-   - `/api/tag/{model}` - Process a single text input
-   - `/api/batch/{model}` - Process multiple texts in one request
-   - `/api/stream/{model}` - Stream process multiple texts
-   - `/api/models` - Get status of all models
-   - `/api/models/{model}/download` - Explicitly trigger model download
+- **Multiple Languages**: 7 built-in historical language models (can be activated/deactivated)
+- **High Performance**: Concurrent batch processing, LRU caching with TTL
+- **Streaming**: NDJSON and Server-Sent Events (SSE) formats
+- **GPU Support**: Automatic CUDA detection and utilization
+- **Production Ready**: Health checks, model preloading, comprehensive API
+- **Token Authentication**: Optional token-based security with scopes (read, write, admin)
+- **SQLite Database**: Persistent storage for models, tokens, cache, audit logs, and metrics
+- **Admin API**: Model activation/deactivation and token management
+- **Request Logging**: Track all API requests with detailed metrics
+- **Audit Trail**: Complete audit logging for security-sensitive operations
 
-## Configuration
+## Supported Languages
 
-The application requires Python 3.8 to 3.10 and the following environment variable:
+| Code | Language | Code | Language |
+|------|----------|------|----------|
+| `lasla` | Classical Latin | `freem` | Early Modern French |
+| `grc` | Ancient Greek | `fr` | Classical French |
+| `fro` | Old French | `dum` | Old Dutch |
+| | | `occ_cont` | Occitan |
 
-```
-DOWNLOAD_MODEL_PATH="/path/to/store/models"
-```
+## Quick Start
 
-## Usage Examples
-
-### Single Text Processing
-
-```bash
-curl -X POST "http://localhost:8000/api/tag/lasla" \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Lorem ipsum dolor sit amet", "lower": true}'
-```
-
-### Batch Processing
+### With Docker (recommended)
 
 ```bash
-curl -X POST "http://localhost:8000/api/batch/lasla" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "texts": [
-      "Lorem ipsum dolor sit amet", 
-      "Consectetur adipiscing elit"
-    ],
-    "lower": false
-  }'
+# CPU
+docker run -p 8000:8000 ghcr.io/grand-siecle/pyhellen:latest
+
+# Or with docker-compose
+docker-compose -f docker/docker-compose.yml up -d pyhellen
 ```
 
-### Streaming Processing
+### Manual Installation
 
 ```bash
-curl -X POST "http://localhost:8000/api/stream/lasla" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "texts": [
-      "Lorem ipsum dolor sit amet", 
-      "Consectetur adipiscing elit",
-      "Sed do eiusmod tempor incididunt"
-    ],
-    "lower": true
-  }'
-```
-
-### Get Model Status
-
-```bash
-curl -X GET "http://localhost:8000/api/models"
-```
-
-### Download a Model
-
-```bash
-curl -X POST "http://localhost:8000/api/models/lasla/download"
-```
-
-## Integration Example
-
-Here's how to integrate the streaming API with JavaScript:
-
-```javascript
-async function streamProcess() {
-  const response = await fetch('http://localhost:8000/api/stream/lasla', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      texts: [
-        "Text 1 to analyze",
-        "Text 2 to analyze",
-        "Text 3 to analyze"
-      ],
-      lower: true
-    }),
-  });
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  
-  let resultArea = document.getElementById('results');
-  
-  while (true) {
-    const { done, value } = await reader.read();
-    
-    if (done) {
-      break;
-    }
-    
-    // Process the stream chunks as they arrive
-    const text = decoder.decode(value);
-    resultArea.innerHTML += text;
-  }
-}
-```
-
-## API Documentation
-
-Full API documentation is available at:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
-
-## Running the Application
-
-```bash
+pip install -r requirements.txt
+cp edit_dot_env .env
 python -m app.main
 ```
 
-The server will start on `http://localhost:8000`.
+API available at `http://localhost:8000` | Docs at `/docs`
+
+## Usage
+
+```bash
+# Tag text
+curl "http://localhost:8000/api/tag/lasla?text=Gallia%20est%20omnis%20divisa"
+
+# Batch processing
+curl -X POST "http://localhost:8000/api/batch/lasla" \
+  -H "Content-Type: application/json" \
+  -d '{"texts": ["Text 1", "Text 2"], "lower": false}'
+
+# Streaming (NDJSON)
+curl -X POST "http://localhost:8000/api/stream/lasla?format=ndjson" \
+  -H "Content-Type: application/json" \
+  -d '{"texts": ["Text 1", "Text 2"]}'
+```
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [API Reference](docs/api.md) | Complete API endpoints documentation |
+| [Authentication](docs/authentication.md) | Token-based security setup |
+| [Configuration](docs/configuration.md) | Environment variables reference |
+| [Docker](docs/docker.md) | Docker deployment guide |
+
+## Development
+
+```bash
+# Install dev dependencies
+pip install -r requirements-dev.txt
+
+# Run tests
+pytest tests/ -v
+
+# Run with coverage
+pytest tests/ --cov=app --cov-report=html
+```
+
+## License
+
+GPL-3.0 - See [LICENSE](LICENSE)
