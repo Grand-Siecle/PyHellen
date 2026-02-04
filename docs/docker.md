@@ -176,6 +176,100 @@ volumes:
   model_data:
 ```
 
+## Monitoring Stack (Prometheus + Grafana)
+
+The docker-compose includes optional monitoring services for production observability.
+
+### Available Services
+
+| Service | Description | Port | Usage |
+|---------|-------------|------|-------|
+| `pyhellen` | API (CPU) | 8000 | Choose ONE |
+| `pyhellen-gpu` | API (GPU) | 8000 | Choose ONE |
+| `prometheus` | Metrics collection | 9090 | Optional |
+| `grafana` | Visualization | 3000 | Optional |
+
+> **Note:** `pyhellen` and `pyhellen-gpu` are alternatives. Use one OR the other, not both.
+
+### Quick Start with Monitoring
+
+```bash
+cd docker
+
+# Copy and configure environment
+cp .env.example .env
+nano .env  # Edit credentials
+
+# CPU version with monitoring
+sudo docker-compose -p pyhellen -f docker-compose.yml up -d pyhellen prometheus grafana
+
+# GPU version with monitoring
+sudo docker-compose -p pyhellen -f docker-compose.yml up -d pyhellen-gpu prometheus grafana
+```
+
+### Configuration (.env)
+
+Create a `.env` file in the `docker/` directory:
+
+```env
+# Grafana credentials
+GRAFANA_ADMIN_USER=admin
+GRAFANA_ADMIN_PASSWORD=your_secure_password
+GRAFANA_PORT=3000
+GRAFANA_ROOT_URL=http://localhost:3000
+
+# Prometheus
+PROMETHEUS_PORT=9090
+```
+
+### Access
+
+- **PyHellen API**: http://localhost:8000
+- **Prometheus**: http://localhost:9090
+- **Grafana**: http://localhost:3000
+
+### Grafana Dashboard
+
+A pre-configured "PyHellen API" dashboard is automatically loaded with:
+
+- Total requests / errors
+- Models loaded count
+- Cache hit rate
+- Request rate over time
+- Requests per model
+- Average processing time per model
+
+### Metrics Endpoint
+
+PyHellen exposes Prometheus metrics at `/service/metrics`:
+
+```bash
+curl http://localhost:8000/service/metrics
+```
+
+Example output:
+```
+# HELP pyhellen_requests_total Total number of requests
+# TYPE pyhellen_requests_total counter
+pyhellen_requests_total 42
+
+# HELP pyhellen_models_loaded Number of models currently loaded
+# TYPE pyhellen_models_loaded gauge
+pyhellen_models_loaded 2
+```
+
+### Without Monitoring
+
+If you don't need monitoring, simply omit the services:
+
+```bash
+# API only (CPU)
+sudo docker-compose -p pyhellen -f docker-compose.yml up -d pyhellen
+
+# API only (GPU)
+sudo docker-compose -p pyhellen -f docker-compose.yml up -d pyhellen-gpu
+```
+
 ## GPU Requirements
 
 To use GPU acceleration:
