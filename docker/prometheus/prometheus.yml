@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # PyHellen API metrics (CPU version)
+  - job_name: 'pyhellen'
+    static_configs:
+      - targets: ['pyhellen:8000']
+    metrics_path: '/service/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  # PyHellen API metrics (GPU version)
+  - job_name: 'pyhellen-gpu'
+    static_configs:
+      - targets: ['pyhellen-gpu:8000']
+    metrics_path: '/service/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
