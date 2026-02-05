@@ -2,12 +2,6 @@
 
 Complete documentation of all PyHellen API endpoints.
 
-## Base URL
-
-```
-http://localhost:8000
-```
-
 ## NLP Endpoints
 
 ### List Languages
