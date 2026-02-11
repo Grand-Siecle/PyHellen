@@ -7,6 +7,7 @@ import functools
 import importlib
 import json
 import os
+import threading
 import time
 
 import httpx
@@ -119,6 +120,7 @@ class ModelManager:
         self.download_locks: Dict[str, asyncio.Lock] = {}
         self.is_downloading: Dict[str, bool] = {}
         self.models: Dict[str, Any] = {}  # For backwards compatibility
+        self._model_inference_locks: Dict[str, threading.Lock] = {}
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=get_n_workers())
         self._processing_semaphore = asyncio.Semaphore(settings.max_concurrent_processing)
         self._http_client: Optional[httpx.AsyncClient] = None
@@ -186,7 +188,6 @@ class ModelManager:
         if self._metrics is None:
             return
 
-        import threading
         if not hasattr(self, '_metrics_thread_lock'):
             self._metrics_thread_lock = threading.Lock()
 
@@ -489,7 +490,6 @@ class ModelManager:
         if module in self.taggers and self.taggers[module]:
             # Update last used timestamp (thread-safe)
             if self._metrics:
-                import threading
                 if not hasattr(self, '_metrics_thread_lock'):
                     self._metrics_thread_lock = threading.Lock()
                 with self._metrics_thread_lock:
@@ -549,8 +549,9 @@ class ModelManager:
                 logger.warning(f"⚠️ Could not import iterator and processor for '{module}': {e}")
                 self.iterator_processors[module] = None
 
-            # Store the loaded tagger
+            # Store the loaded tagger and create its inference lock
             self.taggers[module] = tagger
+            self._model_inference_locks[module] = threading.Lock()
 
             # Update metrics
             load_time = (time.time() - start_time) * 1000
@@ -583,18 +584,25 @@ class ModelManager:
             text = text.lower()
 
         try:
-            # Get the appropriate iterator and processor if available
-            if model_name in self.iterator_processors and self.iterator_processors[model_name]:
-                try:
-                    iterator, processor = self.iterator_processors[model_name]()
-                    result = tagger.tag_str(text, iterator=iterator, processor=processor)
-                except Exception as e:
-                    logger.error(f"❌ Error using custom iterator/processor for '{model_name}': {e}")
-                    # Fall back to default tagging if custom iterator/processor fails
+            # Acquire per-model lock to serialize tagger access (not thread-safe)
+            lock = self._model_inference_locks.get(model_name)
+            if lock is None:
+                lock = threading.Lock()
+                self._model_inference_locks[model_name] = lock
+
+            with lock:
+                # Get the appropriate iterator and processor if available
+                if model_name in self.iterator_processors and self.iterator_processors[model_name]:
+                    try:
+                        iterator, processor = self.iterator_processors[model_name]()
+                        result = tagger.tag_str(text, iterator=iterator, processor=processor)
+                    except Exception as e:
+                        logger.error(f"❌ Error using custom iterator/processor for '{model_name}': {e}")
+                        # Fall back to default tagging if custom iterator/processor fails
+                        result = tagger.tag(text)
+                else:
+                    # Use default tagging method if no custom iterator/processor is available
                     result = tagger.tag(text)
-            else:
-                # Use default tagging method if no custom iterator/processor is available
-                result = tagger.tag(text)
 
             # Update metrics (thread-safe)
             process_time = (time.time() - start_time) * 1000
@@ -853,6 +861,8 @@ class ModelManager:
             del self.taggers[model_name]
             if model_name in self.iterator_processors:
                 del self.iterator_processors[model_name]
+            if model_name in self._model_inference_locks:
+                del self._model_inference_locks[model_name]
             logger.info(f"✅ Model '{model_name}' unloaded from memory")
             return True
         except Exception as e:
@@ -887,6 +897,7 @@ class ModelManager:
         # Clear models
         self.taggers.clear()
         self.iterator_processors.clear()
+        self._model_inference_locks.clear()
 
         # Log final metrics
         if self._metrics:
