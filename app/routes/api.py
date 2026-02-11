@@ -260,7 +260,7 @@ async def tag_text(
 async def batch_process(
     model: str,
     batch_data: BatchTextInput,
-    concurrent: bool = Query(True, description="Use concurrent processing for better performance"),
+    concurrent: bool = Query(False, description="Use concurrent processing (experimental)"),
     _: Optional[Token] = Depends(require_auth)
 ):
     """
