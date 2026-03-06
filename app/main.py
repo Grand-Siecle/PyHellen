@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Using PIE_EXTENDED_DOWNLOADS: {PIE_EXTENDED_DOWNLOADS}")
 
     # Initialize database (creates tables and default models if needed)
-    db_engine = get_db_manager()  # get_db_manager is aliased to get_db_engine
+    get_db_manager()  # Initialize database engine
     model_repo = ModelRepository()
     active_models = model_repo.get_active_codes()
     logger.info(f"Database initialized. Active models: {active_models}")
@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
             enabled=settings.auth_enabled,
             secret_key=settings.secret_key,
             db_path=settings.token_db_path,
-            auto_create_admin=settings.auto_create_admin_token
+            auto_create_admin=settings.auto_create_admin_token,
         )
         app.state.auth_manager = auth_manager
 
@@ -93,7 +93,8 @@ async def lifespan(app: FastAPI):
             await model_manager._http_client.aclose()
         # Log final metrics
         if model_manager._metrics:
-            logger.info(f"Final metrics: {model_manager._metrics.total_requests} requests, {model_manager._metrics.total_errors} errors")
+            metrics = model_manager._metrics
+            logger.info(f"Final metrics: {metrics.total_requests} requests, {metrics.total_errors} errors")
 
 
 def create_application() -> FastAPI:
@@ -171,9 +172,7 @@ def create_application() -> FastAPI:
             routes=app.routes,
         )
 
-        openapi_schema["info"]["x-logo"] = {
-            "url": "/static/logo.png"
-        }
+        openapi_schema["info"]["x-logo"] = {"url": "/static/logo.png"}
 
         # Add security scheme if auth is enabled
         if settings.auth_enabled:
@@ -183,19 +182,16 @@ def create_application() -> FastAPI:
                     "type": "http",
                     "scheme": "bearer",
                     "bearerFormat": "Token",
-                    "description": "API token obtained from admin endpoints"
+                    "description": "API token obtained from admin endpoints",
                 },
                 "ApiKeyAuth": {
                     "type": "apiKey",
                     "in": "header",
                     "name": "X-API-Key",
-                    "description": "API key in X-API-Key header"
-                }
+                    "description": "API key in X-API-Key header",
+                },
             }
-            openapi_schema["security"] = [
-                {"BearerAuth": []},
-                {"ApiKeyAuth": []}
-            ]
+            openapi_schema["security"] = [{"BearerAuth": []}, {"ApiKeyAuth": []}]
 
         app.openapi_schema = openapi_schema
         return app.openapi_schema

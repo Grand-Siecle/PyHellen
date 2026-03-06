@@ -12,10 +12,9 @@ from app.core.security import (
     require_admin,
     Token,
     TokenCreate,
-    TokenScope,
 )
 from app.core.security.models import TokenResponse, TokenInfo, AuthStatus
-from app.core.database import get_db_manager, ModelRepository, AuditRepository, RequestLogRepository, MetricsRepository
+from app.core.database import ModelRepository, AuditRepository, RequestLogRepository, MetricsRepository
 from app.core.database.repositories.audit_repo import AuditAction
 from app.core.logger import logger
 from app.schemas.models import (
@@ -35,6 +34,7 @@ router = APIRouter()
 # ============================================
 # Dependency injection for repositories
 # ============================================
+
 
 def get_model_repo() -> ModelRepository:
     """Get ModelRepository instance."""
@@ -59,6 +59,7 @@ def get_metrics_repo() -> MetricsRepository:
 def get_model_manager() -> "ModelManager":
     """Get ModelManager instance (lazy import to avoid circular imports)."""
     from app.core.model_manager import model_manager
+
     return model_manager
 
 
@@ -66,10 +67,10 @@ def get_model_manager() -> "ModelManager":
 # Authentication endpoints
 # ============================================
 
+
 @router.get("/auth/status", response_model=AuthStatus)
 async def get_auth_status(
-    token: Optional[Token] = Depends(require_admin),
-    auth_manager: AuthManager = Depends(get_auth_manager)
+    token: Optional[Token] = Depends(require_admin), auth_manager: AuthManager = Depends(get_auth_manager)
 ):
     """
     Get current authentication status.
@@ -80,7 +81,7 @@ async def get_auth_status(
         authenticated=token is not None,
         auth_enabled=auth_manager.enabled,
         token_name=token.name if token else None,
-        scopes=token.scopes if token else []
+        scopes=token.scopes if token else [],
     )
 
 
@@ -88,10 +89,10 @@ async def get_auth_status(
 # Token management endpoints
 # ============================================
 
+
 @router.get("/tokens", response_model=List[TokenInfo])
 async def list_tokens(
-    _: Optional[Token] = Depends(require_admin),
-    auth_manager: AuthManager = Depends(get_auth_manager)
+    _: Optional[Token] = Depends(require_admin), auth_manager: AuthManager = Depends(get_auth_manager)
 ):
     """
     List all tokens.
@@ -99,10 +100,7 @@ async def list_tokens(
     Requires admin privileges. Returns token metadata without sensitive data.
     """
     if not auth_manager.enabled or not auth_manager.db:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Authentication is not enabled"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Authentication is not enabled")
 
     tokens = auth_manager.db.list_tokens()
     return [
@@ -113,7 +111,7 @@ async def list_tokens(
             created_at=t.created_at,
             expires_at=t.expires_at,
             last_used_at=t.last_used_at,
-            is_active=t.is_active
+            is_active=t.is_active,
         )
         for t in tokens
     ]
@@ -124,7 +122,7 @@ async def create_token(
     token_data: TokenCreate,
     current_token: Optional[Token] = Depends(require_admin),
     auth_manager: AuthManager = Depends(get_auth_manager),
-    audit_repo: AuditRepository = Depends(get_audit_repo)
+    audit_repo: AuditRepository = Depends(get_audit_repo),
 ):
     """
     Create a new API token.
@@ -140,16 +138,11 @@ async def create_token(
     - `admin`: Full access including token management
     """
     if not auth_manager.enabled or not auth_manager.db:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Authentication is not enabled"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Authentication is not enabled")
 
     try:
         token_obj, plain_token = auth_manager.create_token(
-            name=token_data.name,
-            scopes=token_data.scopes,
-            expires_days=token_data.expires_days
+            name=token_data.name, scopes=token_data.scopes, expires_days=token_data.expires_days
         )
 
         # Audit log
@@ -158,7 +151,7 @@ async def create_token(
             actor_token_id=current_token.id if current_token else None,
             target_type="token",
             target_id=str(token_obj.id),
-            details={"name": token_data.name, "scopes": [s.value for s in token_data.scopes]}
+            details={"name": token_data.name, "scopes": [s.value for s in token_data.scopes]},
         )
 
         logger.info(f"Created token '{token_data.name}' with scopes: {[s.value for s in token_data.scopes]}")
@@ -169,15 +162,12 @@ async def create_token(
             token=plain_token,
             scopes=token_obj.scopes,
             created_at=token_obj.created_at,
-            expires_at=token_obj.expires_at
+            expires_at=token_obj.expires_at,
         )
 
     except Exception as e:
         logger.error(f"Error creating token: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create token"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create token")
 
 
 @router.delete("/tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -185,7 +175,7 @@ async def revoke_token(
     token_id: int,
     current_token: Optional[Token] = Depends(require_admin),
     auth_manager: AuthManager = Depends(get_auth_manager),
-    audit_repo: AuditRepository = Depends(get_audit_repo)
+    audit_repo: AuditRepository = Depends(get_audit_repo),
 ):
     """
     Revoke a token by ID.
@@ -193,31 +183,22 @@ async def revoke_token(
     Requires admin privileges. Revoked tokens cannot be used for authentication.
     """
     if not auth_manager.enabled or not auth_manager.db:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Authentication is not enabled"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Authentication is not enabled")
 
     # Prevent revoking own token
     if current_token and current_token.id == token_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot revoke your own token"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot revoke your own token")
 
     success = auth_manager.db.revoke_token(token_id)
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Token with id {token_id} not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Token with id {token_id} not found")
 
     # Audit log
     audit_repo.log(
         action=AuditAction.TOKEN_REVOKED,
         actor_token_id=current_token.id if current_token else None,
         target_type="token",
-        target_id=str(token_id)
+        target_id=str(token_id),
     )
 
     logger.info(f"Revoked token id={token_id}")
@@ -228,7 +209,7 @@ async def delete_token_permanently(
     token_id: int,
     current_token: Optional[Token] = Depends(require_admin),
     auth_manager: AuthManager = Depends(get_auth_manager),
-    audit_repo: AuditRepository = Depends(get_audit_repo)
+    audit_repo: AuditRepository = Depends(get_audit_repo),
 ):
     """
     Permanently delete a token.
@@ -236,31 +217,22 @@ async def delete_token_permanently(
     Requires admin privileges. This action cannot be undone.
     """
     if not auth_manager.enabled or not auth_manager.db:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Authentication is not enabled"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Authentication is not enabled")
 
     # Prevent deleting own token
     if current_token and current_token.id == token_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete your own token"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete your own token")
 
     success = auth_manager.db.delete_token(token_id)
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Token with id {token_id} not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Token with id {token_id} not found")
 
     # Audit log
     audit_repo.log(
         action=AuditAction.TOKEN_DELETED,
         actor_token_id=current_token.id if current_token else None,
         target_type="token",
-        target_id=str(token_id)
+        target_id=str(token_id),
     )
 
     logger.info(f"Permanently deleted token id={token_id}")
@@ -270,7 +242,7 @@ async def delete_token_permanently(
 async def cleanup_expired_tokens(
     current_token: Optional[Token] = Depends(require_admin),
     auth_manager: AuthManager = Depends(get_auth_manager),
-    audit_repo: AuditRepository = Depends(get_audit_repo)
+    audit_repo: AuditRepository = Depends(get_audit_repo),
 ):
     """
     Remove all expired tokens from the database.
@@ -278,10 +250,7 @@ async def cleanup_expired_tokens(
     Requires admin privileges.
     """
     if not auth_manager.enabled or not auth_manager.db:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Authentication is not enabled"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Authentication is not enabled")
 
     count = auth_manager.db.cleanup_expired()
 
@@ -290,7 +259,7 @@ async def cleanup_expired_tokens(
         action=AuditAction.TOKEN_EXPIRED_CLEANUP,
         actor_token_id=current_token.id if current_token else None,
         target_type="token",
-        details={"removed_count": count}
+        details={"removed_count": count},
     )
 
     return {"removed_tokens": count, "message": f"Cleaned up {count} expired tokens"}
@@ -298,8 +267,7 @@ async def cleanup_expired_tokens(
 
 @router.get("/tokens/stats")
 async def get_token_stats(
-    _: Optional[Token] = Depends(require_admin),
-    auth_manager: AuthManager = Depends(get_auth_manager)
+    _: Optional[Token] = Depends(require_admin), auth_manager: AuthManager = Depends(get_auth_manager)
 ):
     """
     Get token statistics.
@@ -307,10 +275,7 @@ async def get_token_stats(
     Requires admin privileges.
     """
     if not auth_manager.enabled or not auth_manager.db:
-        return {
-            "auth_enabled": False,
-            "message": "Authentication is not enabled"
-        }
+        return {"auth_enabled": False, "message": "Authentication is not enabled"}
 
     stats = auth_manager.db.get_token_count()
     stats["auth_enabled"] = True
@@ -321,11 +286,12 @@ async def get_token_stats(
 # Model management endpoints
 # ============================================
 
+
 @router.get("/models", response_model=ModelListResponse)
 async def list_models(
     include_inactive: bool = False,
     _: Optional[Token] = Depends(require_admin),
-    model_repo: ModelRepository = Depends(get_model_repo)
+    model_repo: ModelRepository = Depends(get_model_repo),
 ):
     """
     List all models.
@@ -351,19 +317,18 @@ async def list_models(
                 batch_size=m.batch_size,
                 priority=m.priority,
                 created_at=m.created_at,
-                updated_at=m.updated_at
+                updated_at=m.updated_at,
             )
             for m in models
         ],
         total=stats["total"],
-        active=stats["active"]
+        active=stats["active"],
     )
 
 
 @router.get("/models/stats", response_model=ModelStatistics)
 async def get_model_statistics(
-    _: Optional[Token] = Depends(require_admin),
-    model_repo: ModelRepository = Depends(get_model_repo)
+    _: Optional[Token] = Depends(require_admin), model_repo: ModelRepository = Depends(get_model_repo)
 ):
     """
     Get model statistics.
@@ -378,7 +343,7 @@ async def get_model(
     code: str,
     _: Optional[Token] = Depends(require_admin),
     model_repo: ModelRepository = Depends(get_model_repo),
-    mgr: "ModelManager" = Depends(get_model_manager)
+    mgr: "ModelManager" = Depends(get_model_manager),
 ):
     """
     Get detailed information about a specific model.
@@ -387,10 +352,7 @@ async def get_model(
     """
     model = model_repo.get_by_code(code)
     if not model:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Model '{code}' not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{code}' not found")
 
     files = model_repo.get_model_files(code)
     total_size = sum(f.size_bytes or 0 for f in files if f.is_downloaded)
@@ -425,7 +387,7 @@ async def get_model(
                 size_bytes=f.size_bytes,
                 checksum=f.checksum,
                 is_downloaded=f.is_downloaded,
-                downloaded_at=f.downloaded_at
+                downloaded_at=f.downloaded_at,
             )
             for f in files
         ],
@@ -433,7 +395,7 @@ async def get_model(
         status=model_status,
         device=device,
         has_custom_processor=has_custom_processor,
-        metrics=metrics
+        metrics=metrics,
     )
 
 
@@ -442,7 +404,7 @@ async def create_model(
     model_data: ModelCreate,
     current_token: Optional[Token] = Depends(require_admin),
     model_repo: ModelRepository = Depends(get_model_repo),
-    audit_repo: AuditRepository = Depends(get_audit_repo)
+    audit_repo: AuditRepository = Depends(get_audit_repo),
 ):
     """
     Create a new model.
@@ -455,10 +417,7 @@ async def create_model(
     # Check if model already exists
     existing = model_repo.get_by_code(model_data.code)
     if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Model '{model_data.code}' already exists"
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Model '{model_data.code}' already exists")
 
     try:
         model = model_repo.create(
@@ -467,7 +426,7 @@ async def create_model(
             pie_module=model_data.pie_module,
             description=model_data.description,
             batch_size=model_data.batch_size,
-            priority=model_data.priority
+            priority=model_data.priority,
         )
 
         # Audit log
@@ -476,7 +435,7 @@ async def create_model(
             actor_token_id=current_token.id if current_token else None,
             target_type="model",
             target_id=model_data.code,
-            details={"name": model_data.name, "pie_module": model_data.pie_module}
+            details={"name": model_data.name, "pie_module": model_data.pie_module},
         )
 
         logger.info(f"Created model '{model_data.code}'")
@@ -492,14 +451,13 @@ async def create_model(
             batch_size=model.batch_size,
             priority=model.priority,
             created_at=model.created_at,
-            updated_at=model.updated_at
+            updated_at=model.updated_at,
         )
 
     except Exception as e:
         logger.error(f"Error creating model: {e}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create model: {type(e).__name__}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create model: {type(e).__name__}"
         )
 
 
@@ -509,7 +467,7 @@ async def update_model(
     model_data: ModelUpdate,
     current_token: Optional[Token] = Depends(require_admin),
     model_repo: ModelRepository = Depends(get_model_repo),
-    audit_repo: AuditRepository = Depends(get_audit_repo)
+    audit_repo: AuditRepository = Depends(get_audit_repo),
 ):
     """
     Update a model's properties.
@@ -518,10 +476,7 @@ async def update_model(
     """
     model = model_repo.get_by_code(code)
     if not model:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Model '{code}' not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{code}' not found")
 
     updated = model_repo.update(
         code=code,
@@ -529,7 +484,7 @@ async def update_model(
         description=model_data.description,
         pie_module=model_data.pie_module,
         batch_size=model_data.batch_size,
-        priority=model_data.priority
+        priority=model_data.priority,
     )
 
     # Audit log
@@ -538,7 +493,7 @@ async def update_model(
         actor_token_id=current_token.id if current_token else None,
         target_type="model",
         target_id=code,
-        details=model_data.model_dump(exclude_none=True)
+        details=model_data.model_dump(exclude_none=True),
     )
 
     return ModelInfo(
@@ -552,7 +507,7 @@ async def update_model(
         batch_size=updated.batch_size,
         priority=updated.priority,
         created_at=updated.created_at,
-        updated_at=updated.updated_at
+        updated_at=updated.updated_at,
     )
 
 
@@ -561,7 +516,7 @@ async def delete_model(
     code: str,
     current_token: Optional[Token] = Depends(require_admin),
     model_repo: ModelRepository = Depends(get_model_repo),
-    audit_repo: AuditRepository = Depends(get_audit_repo)
+    audit_repo: AuditRepository = Depends(get_audit_repo),
 ):
     """
     Delete a model.
@@ -570,30 +525,23 @@ async def delete_model(
     """
     model = model_repo.get_by_code(code)
     if not model:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Model '{code}' not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{code}' not found")
 
     if model.is_builtin:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete builtin models. Use deactivate instead."
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete builtin models. Use deactivate instead."
         )
 
     success = model_repo.delete(code)
     if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete model"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete model")
 
     # Audit log
     audit_repo.log(
         action=AuditAction.MODEL_DELETED,
         actor_token_id=current_token.id if current_token else None,
         target_type="model",
-        target_id=code
+        target_id=code,
     )
 
     logger.info(f"Deleted model '{code}'")
@@ -604,7 +552,7 @@ async def activate_model(
     code: str,
     current_token: Optional[Token] = Depends(require_admin),
     model_repo: ModelRepository = Depends(get_model_repo),
-    audit_repo: AuditRepository = Depends(get_audit_repo)
+    audit_repo: AuditRepository = Depends(get_audit_repo),
 ):
     """
     Activate a model.
@@ -613,16 +561,10 @@ async def activate_model(
     """
     model = model_repo.get_by_code(code)
     if not model:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Model '{code}' not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{code}' not found")
 
     if model.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Model '{code}' is already active"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Model '{code}' is already active")
 
     model_repo.activate(code)
 
@@ -631,7 +573,7 @@ async def activate_model(
         action=AuditAction.MODEL_ACTIVATED,
         actor_token_id=current_token.id if current_token else None,
         target_type="model",
-        target_id=code
+        target_id=code,
     )
 
     return ModelInfo(
@@ -645,7 +587,7 @@ async def activate_model(
         batch_size=model.batch_size,
         priority=model.priority,
         created_at=model.created_at,
-        updated_at=model.updated_at
+        updated_at=model.updated_at,
     )
 
 
@@ -655,7 +597,7 @@ async def deactivate_model(
     current_token: Optional[Token] = Depends(require_admin),
     model_repo: ModelRepository = Depends(get_model_repo),
     audit_repo: AuditRepository = Depends(get_audit_repo),
-    mgr: "ModelManager" = Depends(get_model_manager)
+    mgr: "ModelManager" = Depends(get_model_manager),
 ):
     """
     Deactivate a model.
@@ -665,16 +607,10 @@ async def deactivate_model(
     """
     model = model_repo.get_by_code(code)
     if not model:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Model '{code}' not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{code}' not found")
 
     if not model.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Model '{code}' is already inactive"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Model '{code}' is already inactive")
 
     # Deactivate in database first (prevents new requests)
     model_repo.deactivate(code)
@@ -689,7 +625,7 @@ async def deactivate_model(
         action=AuditAction.MODEL_DEACTIVATED,
         actor_token_id=current_token.id if current_token else None,
         target_type="model",
-        target_id=code
+        target_id=code,
     )
 
     return ModelInfo(
@@ -703,7 +639,7 @@ async def deactivate_model(
         batch_size=model.batch_size,
         priority=model.priority,
         created_at=model.created_at,
-        updated_at=model.updated_at
+        updated_at=model.updated_at,
     )
 
 
@@ -712,7 +648,7 @@ async def add_model_file(
     code: str,
     file_data: ModelFileCreate,
     _: Optional[Token] = Depends(require_admin),
-    model_repo: ModelRepository = Depends(get_model_repo)
+    model_repo: ModelRepository = Depends(get_model_repo),
 ):
     """
     Add a file to a model.
@@ -722,24 +658,18 @@ async def add_model_file(
     """
     model = model_repo.get_by_code(code)
     if not model:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Model '{code}' not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{code}' not found")
 
     file = model_repo.add_model_file(
         code=code,
         filename=file_data.filename,
         url=file_data.url,
         size_bytes=file_data.size_bytes,
-        checksum=file_data.checksum
+        checksum=file_data.checksum,
     )
 
     if not file:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to add model file"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to add model file")
 
     return ModelFileInfo(
         id=file.id,
@@ -748,7 +678,7 @@ async def add_model_file(
         size_bytes=file.size_bytes,
         checksum=file.checksum,
         is_downloaded=file.is_downloaded,
-        downloaded_at=file.downloaded_at
+        downloaded_at=file.downloaded_at,
     )
 
 
@@ -756,13 +686,14 @@ async def add_model_file(
 # Audit log endpoints
 # ============================================
 
+
 @router.get("/audit")
 async def get_audit_log(
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of entries to return"),
     offset: int = Query(0, ge=0, description="Number of entries to skip"),
     action: Optional[str] = Query(None, description="Filter by action type"),
     _: Optional[Token] = Depends(require_admin),
-    audit_repo: AuditRepository = Depends(get_audit_repo)
+    audit_repo: AuditRepository = Depends(get_audit_repo),
 ):
     """
     Get audit log entries.
@@ -785,11 +716,11 @@ async def get_audit_log(
                 "target_id": e.target_id,
                 "details": e.details,
                 "client_ip": e.client_ip,
-                "success": e.success
+                "success": e.success,
             }
             for e in entries
         ],
-        "count": len(entries)
+        "count": len(entries),
     }
 
 
@@ -797,7 +728,7 @@ async def get_audit_log(
 async def get_audit_statistics(
     hours: int = Query(24, ge=1, le=8760, description="Number of hours to look back (max 1 year)"),
     _: Optional[Token] = Depends(require_admin),
-    audit_repo: AuditRepository = Depends(get_audit_repo)
+    audit_repo: AuditRepository = Depends(get_audit_repo),
 ):
     """
     Get audit statistics.
@@ -811,7 +742,7 @@ async def get_audit_statistics(
 async def cleanup_audit_log(
     days: int = Query(90, ge=1, le=365, description="Remove entries older than this many days"),
     _: Optional[Token] = Depends(require_admin),
-    audit_repo: AuditRepository = Depends(get_audit_repo)
+    audit_repo: AuditRepository = Depends(get_audit_repo),
 ):
     """
     Clean up old audit log entries.
@@ -826,13 +757,14 @@ async def cleanup_audit_log(
 # Request log endpoints
 # ============================================
 
+
 @router.get("/requests")
 async def get_request_log(
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of entries to return"),
     offset: int = Query(0, ge=0, description="Number of entries to skip"),
     model: Optional[str] = Query(None, description="Filter by model code"),
     _: Optional[Token] = Depends(require_admin),
-    request_log_repo: RequestLogRepository = Depends(get_request_log_repo)
+    request_log_repo: RequestLogRepository = Depends(get_request_log_repo),
 ):
     """
     Get request log entries.
@@ -858,11 +790,11 @@ async def get_request_log(
                 "from_cache": e.from_cache,
                 "status_code": e.status_code,
                 "error_message": e.error_message,
-                "client_ip": e.client_ip
+                "client_ip": e.client_ip,
             }
             for e in entries
         ],
-        "count": len(entries)
+        "count": len(entries),
     }
 
 
@@ -870,7 +802,7 @@ async def get_request_log(
 async def get_request_statistics(
     hours: int = Query(24, ge=1, le=8760, description="Number of hours to look back (max 1 year)"),
     _: Optional[Token] = Depends(require_admin),
-    request_log_repo: RequestLogRepository = Depends(get_request_log_repo)
+    request_log_repo: RequestLogRepository = Depends(get_request_log_repo),
 ):
     """
     Get request statistics.
@@ -884,7 +816,7 @@ async def get_request_statistics(
 async def get_request_errors(
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of entries to return"),
     _: Optional[Token] = Depends(require_admin),
-    request_log_repo: RequestLogRepository = Depends(get_request_log_repo)
+    request_log_repo: RequestLogRepository = Depends(get_request_log_repo),
 ):
     """
     Get recent error requests.
@@ -902,11 +834,11 @@ async def get_request_errors(
                 "method": e.method,
                 "status_code": e.status_code,
                 "error_message": e.error_message,
-                "client_ip": e.client_ip
+                "client_ip": e.client_ip,
             }
             for e in entries
         ],
-        "count": len(entries)
+        "count": len(entries),
     }
 
 
@@ -914,7 +846,7 @@ async def get_request_errors(
 async def cleanup_request_log(
     days: int = Query(30, ge=1, le=365, description="Remove entries older than this many days"),
     _: Optional[Token] = Depends(require_admin),
-    request_log_repo: RequestLogRepository = Depends(get_request_log_repo)
+    request_log_repo: RequestLogRepository = Depends(get_request_log_repo),
 ):
     """
     Clean up old request log entries.
@@ -929,10 +861,10 @@ async def cleanup_request_log(
 # Metrics endpoints (persistent)
 # ============================================
 
+
 @router.get("/metrics/persistent")
 async def get_persistent_metrics(
-    _: Optional[Token] = Depends(require_admin),
-    metrics_repo: MetricsRepository = Depends(get_metrics_repo)
+    _: Optional[Token] = Depends(require_admin), metrics_repo: MetricsRepository = Depends(get_metrics_repo)
 ):
     """
     Get persistent metrics from database.
@@ -943,20 +875,12 @@ async def get_persistent_metrics(
     all_metrics = metrics_repo.get_all()
     global_stats = metrics_repo.get_global_statistics()
 
-    return {
-        "global": global_stats,
-        "models": {
-            code: metrics.to_dict()
-            for code, metrics in all_metrics.items()
-        }
-    }
+    return {"global": global_stats, "models": {code: metrics.to_dict() for code, metrics in all_metrics.items()}}
 
 
 @router.get("/metrics/persistent/{model}")
 async def get_model_persistent_metrics(
-    model: str,
-    _: Optional[Token] = Depends(require_admin),
-    metrics_repo: MetricsRepository = Depends(get_metrics_repo)
+    model: str, _: Optional[Token] = Depends(require_admin), metrics_repo: MetricsRepository = Depends(get_metrics_repo)
 ):
     """
     Get persistent metrics for a specific model.
@@ -965,10 +889,7 @@ async def get_model_persistent_metrics(
     """
     metrics = metrics_repo.get_by_model(model)
     if not metrics:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No metrics found for model '{model}'"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No metrics found for model '{model}'")
 
     return metrics.to_dict()
 
@@ -977,7 +898,7 @@ async def get_model_persistent_metrics(
 async def reset_metrics(
     model: Optional[str] = None,
     _: Optional[Token] = Depends(require_admin),
-    metrics_repo: MetricsRepository = Depends(get_metrics_repo)
+    metrics_repo: MetricsRepository = Depends(get_metrics_repo),
 ):
     """
     Reset metrics.
@@ -990,10 +911,7 @@ async def reset_metrics(
     if model:
         success = metrics_repo.reset(model)
         if not success:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model '{model}' not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{model}' not found")
         return {"message": f"Reset metrics for model '{model}'"}
     else:
         count = metrics_repo.reset_all()

@@ -38,6 +38,7 @@ class RequestLoggerMiddleware(BaseHTTPMiddleware):
         if self._repo is None:
             try:
                 from app.core.database import RequestLogRepository
+
                 self._repo = RequestLogRepository()
             except Exception as e:
                 logger.warning(f"Could not initialize request logger: {e}")
@@ -128,7 +129,7 @@ class RequestLoggerMiddleware(BaseHTTPMiddleware):
                         token_id=token_id,
                         processing_time_ms=round(processing_time_ms, 2),
                         error_message=error_message,
-                        client_ip=client_ip
+                        client_ip=client_ip,
                     )
             except Exception as log_error:
                 # Don't let logging errors affect the request

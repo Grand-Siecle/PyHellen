@@ -1,11 +1,8 @@
 """Base repository class with SQLModel session management."""
 
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
 from sqlmodel import Session
-
-if TYPE_CHECKING:
-    from app.core.database.engine import DatabaseEngine
 
 
 class BaseRepository:
@@ -29,6 +26,7 @@ class BaseRepository:
         """Lazy load database engine."""
         if self._engine is None:
             from app.core.database.engine import get_db_engine
+
             self._engine = get_db_engine()
         return self._engine
 

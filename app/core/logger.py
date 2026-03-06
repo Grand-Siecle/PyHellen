@@ -51,17 +51,17 @@ class DevelopmentFormatter(logging.Formatter):
     """Human-readable formatter for local development."""
 
     COLORS = {
-        "DEBUG": "\033[36m",     # Cyan
-        "INFO": "\033[32m",      # Green
-        "WARNING": "\033[33m",   # Yellow
-        "ERROR": "\033[31m",     # Red
+        "DEBUG": "\033[36m",  # Cyan
+        "INFO": "\033[32m",  # Green
+        "WARNING": "\033[33m",  # Yellow
+        "ERROR": "\033[31m",  # Red
         "CRITICAL": "\033[35m",  # Magenta
     }
     RESET = "\033[0m"
 
     def format(self, record: logging.LogRecord) -> str:
         # Check if terminal supports colors
-        use_colors = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
+        use_colors = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         level = record.levelname
@@ -80,11 +80,7 @@ class DevelopmentFormatter(logging.Formatter):
         return message
 
 
-def setup_logging(
-    log_level: str = None,
-    json_format: bool = None,
-    log_file: str = None
-) -> logging.Logger:
+def setup_logging(log_level: str = None, json_format: bool = None, log_file: str = None) -> logging.Logger:
     """
     Configure logging for the application.
 
@@ -113,8 +109,9 @@ def setup_logging(
             json_format = False
         else:
             # Auto-detect: use JSON in Docker/production, text in development
-            json_format = os.getenv("DOCKER_CONTAINER", "") == "true" or \
-                          os.getenv("KUBERNETES_SERVICE_HOST") is not None
+            json_format = (
+                os.getenv("DOCKER_CONTAINER", "") == "true" or os.getenv("KUBERNETES_SERVICE_HOST") is not None
+            )
 
     if log_file is None:
         log_file = os.getenv("LOG_FILE")

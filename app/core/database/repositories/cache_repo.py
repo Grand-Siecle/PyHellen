@@ -48,9 +48,7 @@ class CacheRepository(BaseRepository):
 
         session = self._get_session()
         try:
-            entry = session.exec(
-                select(CacheEntry).where(CacheEntry.cache_key == cache_key)
-            ).first()
+            entry = session.exec(select(CacheEntry).where(CacheEntry.cache_key == cache_key)).first()
 
             if not entry:
                 return None
@@ -88,9 +86,7 @@ class CacheRepository(BaseRepository):
         session = self._get_session()
         try:
             # Get model
-            model = session.exec(
-                select(Model).where(Model.code == model_code)
-            ).first()
+            model = session.exec(select(Model).where(Model.code == model_code)).first()
 
             if not model:
                 logger.warning(f"Cannot cache: model '{model_code}' not found")
@@ -112,9 +108,7 @@ class CacheRepository(BaseRepository):
                     session.delete(old_entry)
 
             # Check if entry already exists
-            existing = session.exec(
-                select(CacheEntry).where(CacheEntry.cache_key == cache_key)
-            ).first()
+            existing = session.exec(select(CacheEntry).where(CacheEntry.cache_key == cache_key)).first()
 
             if existing:
                 existing.result_json = result_json
@@ -147,9 +141,7 @@ class CacheRepository(BaseRepository):
 
         session = self._get_session()
         try:
-            entry = session.exec(
-                select(CacheEntry).where(CacheEntry.cache_key == cache_key)
-            ).first()
+            entry = session.exec(select(CacheEntry).where(CacheEntry.cache_key == cache_key)).first()
 
             if entry:
                 session.delete(entry)
@@ -179,16 +171,12 @@ class CacheRepository(BaseRepository):
         """Clear all cache entries for a specific model."""
         session = self._get_session()
         try:
-            model = session.exec(
-                select(Model).where(Model.code == model_code)
-            ).first()
+            model = session.exec(select(Model).where(Model.code == model_code)).first()
 
             if not model:
                 return 0
 
-            entries = list(session.exec(
-                select(CacheEntry).where(CacheEntry.model_id == model.id)
-            ).all())
+            entries = list(session.exec(select(CacheEntry).where(CacheEntry.model_id == model.id)).all())
 
             count = len(entries)
             for entry in entries:
@@ -207,9 +195,7 @@ class CacheRepository(BaseRepository):
 
         session = self._get_session()
         try:
-            expired = list(session.exec(
-                select(CacheEntry).where(CacheEntry.expires_at < now)
-            ).all())
+            expired = list(session.exec(select(CacheEntry).where(CacheEntry.expires_at < now)).all())
 
             count = len(expired)
             for entry in expired:
@@ -227,12 +213,8 @@ class CacheRepository(BaseRepository):
         session = self._get_session()
         try:
             total = session.exec(select(func.count(CacheEntry.id))).one()
-            total_hits = session.exec(
-                select(func.coalesce(func.sum(CacheEntry.hit_count), 0))
-            ).one()
-            total_size = session.exec(
-                select(func.coalesce(func.sum(CacheEntry.size_bytes), 0))
-            ).one()
+            total_hits = session.exec(select(func.coalesce(func.sum(CacheEntry.hit_count), 0))).one()
+            total_size = session.exec(select(func.coalesce(func.sum(CacheEntry.size_bytes), 0))).one()
 
             # Per-model stats
             model_stats = session.exec(
@@ -248,10 +230,7 @@ class CacheRepository(BaseRepository):
                 "total_hits": total_hits,
                 "total_size_bytes": total_size,
                 "total_size_mb": round(total_size / (1024 * 1024), 2),
-                "models": {
-                    code: {"entries": count, "hits": hits or 0}
-                    for code, count, hits in model_stats
-                }
+                "models": {code: {"entries": count, "hits": hits or 0} for code, count, hits in model_stats},
             }
         finally:
             self._close_session(session)
@@ -260,11 +239,13 @@ class CacheRepository(BaseRepository):
         """Get cache entries with pagination."""
         session = self._get_session()
         try:
-            return list(session.exec(
-                select(CacheEntry)
-                .order_by(col(CacheEntry.last_hit_at).desc().nullslast(), CacheEntry.created_at.desc())
-                .offset(offset)
-                .limit(limit)
-            ).all())
+            return list(
+                session.exec(
+                    select(CacheEntry)
+                    .order_by(col(CacheEntry.last_hit_at).desc().nullslast(), CacheEntry.created_at.desc())
+                    .offset(offset)
+                    .limit(limit)
+                ).all()
+            )
         finally:
             self._close_session(session)

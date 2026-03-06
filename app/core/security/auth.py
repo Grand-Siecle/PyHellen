@@ -1,6 +1,5 @@
 """Authentication manager and FastAPI dependencies."""
 
-import secrets
 from typing import Optional, List
 from fastapi import Depends, HTTPException, Header, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -25,11 +24,7 @@ class AuthManager:
     _instance: Optional["AuthManager"] = None
 
     def __init__(
-        self,
-        enabled: bool = False,
-        secret_key: str = "",
-        db_path: str = "tokens.db",
-        auto_create_admin: bool = True
+        self, enabled: bool = False, secret_key: str = "", db_path: str = "tokens.db", auto_create_admin: bool = True
     ):
         self.enabled = enabled
         self.secret_key = secret_key
@@ -67,7 +62,7 @@ class AuthManager:
             name="Initial Admin Token",
             scopes=[TokenScope.READ, TokenScope.WRITE, TokenScope.ADMIN],
             secret_key=self.secret_key,
-            expires_days=None  # Never expires
+            expires_days=None,  # Never expires
         )
 
         # Log the token prominently - this is the only time it's visible
@@ -88,12 +83,7 @@ class AuthManager:
             return None
         return self._db.validate_token(token, self.secret_key)
 
-    def create_token(
-        self,
-        name: str,
-        scopes: List[TokenScope],
-        expires_days: Optional[int] = None
-    ) -> tuple:
+    def create_token(self, name: str, scopes: List[TokenScope], expires_days: Optional[int] = None) -> tuple:
         """Create a new token."""
         if not self._db:
             raise RuntimeError("Token database not initialized")
@@ -108,18 +98,11 @@ class AuthManager:
 
     @classmethod
     def setup(
-        cls,
-        enabled: bool,
-        secret_key: str,
-        db_path: str = "tokens.db",
-        auto_create_admin: bool = True
+        cls, enabled: bool, secret_key: str, db_path: str = "tokens.db", auto_create_admin: bool = True
     ) -> "AuthManager":
         """Setup and return the singleton instance."""
         cls._instance = cls(
-            enabled=enabled,
-            secret_key=secret_key,
-            db_path=db_path,
-            auto_create_admin=auto_create_admin
+            enabled=enabled, secret_key=secret_key, db_path=db_path, auto_create_admin=auto_create_admin
         )
         cls._instance.initialize()
         return cls._instance
@@ -132,7 +115,7 @@ def get_auth_manager() -> AuthManager:
 
 async def _extract_token(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
-    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ) -> Optional[str]:
     """Extract token from Authorization header or X-API-Key header."""
     if credentials and credentials.credentials:
@@ -143,8 +126,7 @@ async def _extract_token(
 
 
 async def optional_auth(
-    token: Optional[str] = Depends(_extract_token),
-    auth_manager: AuthManager = Depends(get_auth_manager)
+    token: Optional[str] = Depends(_extract_token), auth_manager: AuthManager = Depends(get_auth_manager)
 ) -> Optional[Token]:
     """
     Optional authentication - returns Token if valid, None if no auth.
@@ -161,8 +143,7 @@ async def optional_auth(
 
 
 async def require_auth(
-    token: Optional[str] = Depends(_extract_token),
-    auth_manager: AuthManager = Depends(get_auth_manager)
+    token: Optional[str] = Depends(_extract_token), auth_manager: AuthManager = Depends(get_auth_manager)
 ) -> Optional[Token]:
     """
     Require authentication if enabled.
@@ -179,7 +160,7 @@ async def require_auth(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
-            headers={"WWW-Authenticate": "Bearer"}
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     token_data = auth_manager.validate_token(token)
@@ -187,15 +168,14 @@ async def require_auth(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"}
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     return token_data
 
 
 async def require_admin(
-    token_data: Optional[Token] = Depends(require_auth),
-    auth_manager: AuthManager = Depends(get_auth_manager)
+    token_data: Optional[Token] = Depends(require_auth), auth_manager: AuthManager = Depends(get_auth_manager)
 ) -> Optional[Token]:
     """
     Require admin scope if authentication is enabled.
@@ -207,16 +187,10 @@ async def require_admin(
         return None
 
     if token_data is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     if TokenScope.ADMIN not in token_data.scopes:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required")
 
     return token_data
 
@@ -228,23 +202,19 @@ def require_scope(required_scope: TokenScope):
     Usage:
         @router.get("/endpoint", dependencies=[Depends(require_scope(TokenScope.WRITE))])
     """
+
     async def check_scope(
-        token_data: Optional[Token] = Depends(require_auth),
-        auth_manager: AuthManager = Depends(get_auth_manager)
+        token_data: Optional[Token] = Depends(require_auth), auth_manager: AuthManager = Depends(get_auth_manager)
     ) -> Optional[Token]:
         if not auth_manager.enabled:
             return None
 
         if token_data is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication required"
-            )
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
         if required_scope not in token_data.scopes:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Scope '{required_scope.value}' required"
+                status_code=status.HTTP_403_FORBIDDEN, detail=f"Scope '{required_scope.value}' required"
             )
 
         return token_data

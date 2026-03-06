@@ -16,6 +16,7 @@ from app.core.logger import logger
 @dataclass
 class CacheEntry:
     """A single cache entry with value and expiration time."""
+
     value: Any
     expires_at: float
     model: str
@@ -57,9 +58,10 @@ class HybridCache:
         if self._db_repo is None and self._persist:
             try:
                 from app.core.database import CacheRepository
+
                 self._db_repo = CacheRepository(
                     max_size=self._max_size * 2,  # DB can hold more
-                    ttl_seconds=self._ttl_seconds
+                    ttl_seconds=self._ttl_seconds,
                 )
             except Exception as e:
                 logger.warning(f"Could not initialize cache persistence: {e}")
@@ -181,10 +183,7 @@ class HybridCache:
         # Clean in-memory
         async with self._lock:
             now = time.time()
-            expired_keys = [
-                key for key, entry in self._cache.items()
-                if now > entry.expires_at
-            ]
+            expired_keys = [key for key, entry in self._cache.items() if now > entry.expires_at]
             for key in expired_keys:
                 del self._cache[key]
             count = len(expired_keys)
@@ -210,10 +209,7 @@ class HybridCache:
 
         # Clear from in-memory using the model field in CacheEntry
         async with self._lock:
-            keys_to_remove = [
-                key for key, entry in self._cache.items()
-                if entry.model == model
-            ]
+            keys_to_remove = [key for key, entry in self._cache.items() if entry.model == model]
             for key in keys_to_remove:
                 del self._cache[key]
             memory_count = len(keys_to_remove)
@@ -229,7 +225,9 @@ class HybridCache:
 
         total_count = memory_count + db_count
         if total_count > 0:
-            logger.info(f"Cleared {total_count} cache entries for model '{model}' (memory: {memory_count}, db: {db_count})")
+            logger.info(
+                f"Cleared {total_count} cache entries for model '{model}' (memory: {memory_count}, db: {db_count})"
+            )
 
         return total_count
 
@@ -246,7 +244,7 @@ class HybridCache:
             "hits": self._hits,
             "misses": self._misses,
             "hit_rate_percent": round(hit_rate, 2),
-            "persistence_enabled": self._persist
+            "persistence_enabled": self._persist,
         }
 
         # Add database stats if available

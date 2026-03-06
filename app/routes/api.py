@@ -6,14 +6,13 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from app.schemas.nlp import SupportedLanguages, PieLanguage
 from app.core.model_manager import model_manager
 from app.core.cache import cache
 from app.core.logger import logger
 from app.core.security import require_auth, require_admin, Token, TokenScope
 from app.core.security.auth import require_scope
 from app.core.security.middleware import validate_model_name, get_allowed_models
-from app.core.database import get_db_manager, ModelRepository
+from app.core.database import ModelRepository
 
 router = APIRouter()
 
@@ -22,34 +21,38 @@ router = APIRouter()
 # Request/Response Models
 # ===================
 
+
 class TextInput(BaseModel):
     """Input model for single text tagging."""
+
     text: str = Field(..., min_length=1, max_length=100000, description="Text to process")
     lower: bool = Field(False, description="Lowercase the text before processing")
 
-    @field_validator('text')
+    @field_validator("text")
     @classmethod
     def text_not_empty(cls, v: str) -> str:
         if not v.strip():
-            raise ValueError('Text cannot be empty or whitespace only')
+            raise ValueError("Text cannot be empty or whitespace only")
         return v
 
 
 class BatchTextInput(BaseModel):
     """Input model for batch text tagging."""
+
     texts: List[str] = Field(..., min_length=1, max_length=100, description="List of texts to process")
     lower: bool = Field(False, description="Lowercase all texts before processing")
 
-    @field_validator('texts')
+    @field_validator("texts")
     @classmethod
     def validate_texts(cls, v: List[str]) -> List[str]:
         if not v:
-            raise ValueError('Texts list cannot be empty')
+            raise ValueError("Texts list cannot be empty")
         return [t for t in v if t.strip()]  # Filter out empty strings
 
 
 class TagResponse(BaseModel):
     """Response model for single text tagging."""
+
     result: List[Dict[str, Any]]
     processing_time_ms: float
     model: str
@@ -58,6 +61,7 @@ class TagResponse(BaseModel):
 
 class BatchResponse(BaseModel):
     """Response model for batch text tagging."""
+
     results: List[List[Dict[str, Any]]]
     total_texts: int
     processing_time_ms: float
@@ -67,6 +71,7 @@ class BatchResponse(BaseModel):
 
 class ModelInfoResponse(BaseModel):
     """Response model for model information."""
+
     name: str
     status: str
     device: str
@@ -79,6 +84,7 @@ class ModelInfoResponse(BaseModel):
 # ===================
 # Helper Functions
 # ===================
+
 
 def _validate_model(model: str) -> str:
     """Validate model name against allowed models."""
@@ -93,35 +99,24 @@ def _handle_processing_error(model: str, error: Exception) -> None:
 
     # Model not available or not found
     if "not available" in error_msg.lower() or "not found" in error_msg.lower():
-        raise HTTPException(
-            status_code=404,
-            detail=f"Model '{model}' is not available"
-        )
+        raise HTTPException(status_code=404, detail=f"Model '{model}' is not available")
 
     # Model failed to load (download failed, file missing, etc.)
     if "failed to load" in error_msg.lower() or "failed to download" in error_msg.lower():
-        raise HTTPException(
-            status_code=503,
-            detail=f"Model '{model}' could not be loaded. Please try again later."
-        )
+        raise HTTPException(status_code=503, detail=f"Model '{model}' could not be loaded. Please try again later.")
 
     # Runtime errors during processing (usually client input issues or model limitations)
     if isinstance(error, (RuntimeError, ValueError)):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Processing failed: {error_msg}"
-        )
+        raise HTTPException(status_code=400, detail=f"Processing failed: {error_msg}")
 
     # Unexpected server errors
-    raise HTTPException(
-        status_code=500,
-        detail="An unexpected error occurred while processing the request"
-    )
+    raise HTTPException(status_code=500, detail="An unexpected error occurred while processing the request")
 
 
 # ===================
 # Public Endpoints (no auth or read scope)
 # ===================
+
 
 @router.get("/languages")
 async def get_languages():
@@ -135,15 +130,8 @@ async def get_languages():
     models = model_repo.get_all(include_inactive=False)
 
     return {
-        "languages": [
-            {
-                "code": m.code,
-                "name": m.name,
-                "description": m.description
-            }
-            for m in models
-        ],
-        "count": len(models)
+        "languages": [{"code": m.code, "name": m.name, "description": m.description} for m in models],
+        "count": len(models),
     }
 
 
@@ -152,7 +140,7 @@ async def tag_text_get(
     model: str,
     text: str = Query(..., min_length=1, max_length=10000, description="Text to process"),
     lower: bool = Query(False, description="Lowercase text before processing"),
-    _: Optional[Token] = Depends(require_auth)
+    _: Optional[Token] = Depends(require_auth),
 ):
     """
     Tag text using GET request (for simple queries).
@@ -174,10 +162,7 @@ async def tag_text_get(
         if cached is not None:
             processing_time = (time.time() - start_time) * 1000
             return TagResponse(
-                result=cached,
-                processing_time_ms=round(processing_time, 2),
-                model=model,
-                from_cache=True
+                result=cached, processing_time_ms=round(processing_time, 2), model=model, from_cache=True
             )
 
         tagger = await model_manager.get_or_load_model(model)
@@ -190,12 +175,7 @@ async def tag_text_get(
         await cache.set(model, text, lower, result)
 
         processing_time = (time.time() - start_time) * 1000
-        return TagResponse(
-            result=result,
-            processing_time_ms=round(processing_time, 2),
-            model=model,
-            from_cache=False
-        )
+        return TagResponse(result=result, processing_time_ms=round(processing_time, 2), model=model, from_cache=False)
 
     except HTTPException:
         raise
@@ -204,11 +184,7 @@ async def tag_text_get(
 
 
 @router.post("/tag/{model}", response_model=TagResponse)
-async def tag_text(
-    model: str,
-    input_data: TextInput,
-    _: Optional[Token] = Depends(require_auth)
-):
+async def tag_text(model: str, input_data: TextInput, _: Optional[Token] = Depends(require_auth)):
     """
     Tag text using the specified model.
 
@@ -227,10 +203,7 @@ async def tag_text(
         if cached is not None:
             processing_time = (time.time() - start_time) * 1000
             return TagResponse(
-                result=cached,
-                processing_time_ms=round(processing_time, 2),
-                model=model,
-                from_cache=True
+                result=cached, processing_time_ms=round(processing_time, 2), model=model, from_cache=True
             )
 
         tagger = await model_manager.get_or_load_model(model)
@@ -243,12 +216,7 @@ async def tag_text(
         await cache.set(model, input_data.text, input_data.lower, result)
 
         processing_time = (time.time() - start_time) * 1000
-        return TagResponse(
-            result=result,
-            processing_time_ms=round(processing_time, 2),
-            model=model,
-            from_cache=False
-        )
+        return TagResponse(result=result, processing_time_ms=round(processing_time, 2), model=model, from_cache=False)
 
     except HTTPException:
         raise
@@ -261,7 +229,7 @@ async def batch_process(
     model: str,
     batch_data: BatchTextInput,
     concurrent: bool = Query(False, description="Use concurrent processing (experimental)"),
-    _: Optional[Token] = Depends(require_auth)
+    _: Optional[Token] = Depends(require_auth),
 ):
     """
     Process multiple texts using the specified model.
@@ -336,7 +304,7 @@ async def batch_process(
             total_texts=len(batch_data.texts),
             processing_time_ms=round(processing_time, 2),
             model=model,
-            cache_hits=cache_hits
+            cache_hits=cache_hits,
         )
 
     except HTTPException:
@@ -350,7 +318,7 @@ async def stream_process(
     model: str,
     batch_data: BatchTextInput,
     format: str = Query("ndjson", description="Output format: 'ndjson' (default), 'sse', or 'plain'"),
-    _: Optional[Token] = Depends(require_auth)
+    _: Optional[Token] = Depends(require_auth),
 ):
     """
     Stream process multiple texts using the specified model.
@@ -371,6 +339,7 @@ async def stream_process(
 
     try:
         if format == "sse":
+
             async def sse_generator():
                 async for result in model_manager.stream_process_sse(model, batch_data.texts, batch_data.lower):
                     yield result
@@ -378,35 +347,24 @@ async def stream_process(
             return StreamingResponse(
                 sse_generator(),
                 media_type="text/event-stream",
-                headers={
-                    'Cache-Control': 'no-cache',
-                    'Connection': 'keep-alive'
-                }
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
             )
         elif format == "ndjson":
+
             async def ndjson_generator():
                 async for result in model_manager.stream_process_ndjson(model, batch_data.texts, batch_data.lower):
                     yield result
 
             return StreamingResponse(
-                ndjson_generator(),
-                media_type="application/x-ndjson",
-                headers={
-                    'Cache-Control': 'no-cache'
-                }
+                ndjson_generator(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache"}
             )
         else:  # plain format (legacy)
+
             async def stream_generator():
                 async for result in model_manager.stream_process(model, batch_data.texts, batch_data.lower):
                     yield result
 
-            return StreamingResponse(
-                stream_generator(),
-                media_type="text/plain",
-                headers={
-                    'Cache-Control': 'no-cache'
-                }
-            )
+            return StreamingResponse(stream_generator(), media_type="text/plain", headers={"Cache-Control": "no-cache"})
 
     except Exception as e:
         _handle_processing_error(model, e)
@@ -415,6 +373,7 @@ async def stream_process(
 # ===================
 # Model Management Endpoints
 # ===================
+
 
 @router.get("/models")
 async def list_models(_: Optional[Token] = Depends(require_auth)):
@@ -428,10 +387,7 @@ async def list_models(_: Optional[Token] = Depends(require_auth)):
 
 
 @router.get("/models/{model}")
-async def get_model_info(
-    model: str,
-    _: Optional[Token] = Depends(require_auth)
-):
+async def get_model_info(model: str, _: Optional[Token] = Depends(require_auth)):
     """
     Get detailed information about a specific model.
 
@@ -445,10 +401,7 @@ async def get_model_info(
 
 
 @router.post("/models/{model}/load")
-async def preload_model(
-    model: str,
-    _: Optional[Token] = Depends(require_scope(TokenScope.WRITE))
-):
+async def preload_model(model: str, _: Optional[Token] = Depends(require_scope(TokenScope.WRITE))):
     """
     Preload a model into memory.
 
@@ -465,12 +418,7 @@ async def preload_model(
             raise HTTPException(status_code=503, detail=f"Model '{model}' could not be loaded")
 
         load_time = (time.time() - start_time) * 1000
-        return {
-            "status": "loaded",
-            "model": model,
-            "load_time_ms": round(load_time, 2),
-            "device": model_manager.device
-        }
+        return {"status": "loaded", "model": model, "load_time_ms": round(load_time, 2), "device": model_manager.device}
     except HTTPException:
         raise
     except Exception as e:
@@ -479,10 +427,7 @@ async def preload_model(
 
 
 @router.post("/models/{model}/unload")
-async def unload_model(
-    model: str,
-    _: Optional[Token] = Depends(require_scope(TokenScope.WRITE))
-):
+async def unload_model(model: str, _: Optional[Token] = Depends(require_scope(TokenScope.WRITE))):
     """
     Unload a model from memory to free resources.
 
@@ -493,16 +438,13 @@ async def unload_model(
     success = await model_manager.unload_model(model)
     if not success:
         raise HTTPException(status_code=404, detail=f"Model '{model}' is not loaded")
-    return {
-        "status": "unloaded",
-        "model": model,
-        "message": f"Model '{model}' has been unloaded from memory"
-    }
+    return {"status": "unloaded", "model": model, "message": f"Model '{model}' has been unloaded from memory"}
 
 
 # ===================
 # Cache Management (requires write scope)
 # ===================
+
 
 @router.get("/cache/stats")
 async def get_cache_stats(_: Optional[Token] = Depends(require_auth)):
@@ -540,6 +482,7 @@ async def cleanup_cache(_: Optional[Token] = Depends(require_scope(TokenScope.WR
 # ===================
 # Metrics (requires admin scope)
 # ===================
+
 
 @router.get("/metrics")
 async def get_metrics(_: Optional[Token] = Depends(require_admin)):

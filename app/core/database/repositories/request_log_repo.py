@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from sqlmodel import Session, select, func, col
+from sqlmodel import select, func, col
 
 from app.core.database.models import Model, RequestLog
 from app.core.database.repositories.base import BaseRepository
@@ -30,7 +30,7 @@ class RequestLogRepository(BaseRepository):
         processing_time_ms: Optional[float] = None,
         from_cache: bool = False,
         error_message: Optional[str] = None,
-        client_ip: Optional[str] = None
+        client_ip: Optional[str] = None,
     ) -> int:
         """
         Log a request.
@@ -43,9 +43,7 @@ class RequestLogRepository(BaseRepository):
         try:
             # Get model_id if model_code provided
             if model_code:
-                model = session.exec(
-                    select(Model).where(Model.code == model_code)
-                ).first()
+                model = session.exec(select(Model).where(Model.code == model_code)).first()
                 if model:
                     model_id = model.id
 
@@ -73,12 +71,11 @@ class RequestLogRepository(BaseRepository):
         """Get recent request logs."""
         session = self._get_session()
         try:
-            return list(session.exec(
-                select(RequestLog)
-                .order_by(col(RequestLog.timestamp).desc())
-                .offset(offset)
-                .limit(limit)
-            ).all())
+            return list(
+                session.exec(
+                    select(RequestLog).order_by(col(RequestLog.timestamp).desc()).offset(offset).limit(limit)
+                ).all()
+            )
         finally:
             self._close_session(session)
 
@@ -86,20 +83,20 @@ class RequestLogRepository(BaseRepository):
         """Get request logs for a specific model."""
         session = self._get_session()
         try:
-            model = session.exec(
-                select(Model).where(Model.code == model_code)
-            ).first()
+            model = session.exec(select(Model).where(Model.code == model_code)).first()
 
             if not model:
                 return []
 
-            return list(session.exec(
-                select(RequestLog)
-                .where(RequestLog.model_id == model.id)
-                .order_by(col(RequestLog.timestamp).desc())
-                .offset(offset)
-                .limit(limit)
-            ).all())
+            return list(
+                session.exec(
+                    select(RequestLog)
+                    .where(RequestLog.model_id == model.id)
+                    .order_by(col(RequestLog.timestamp).desc())
+                    .offset(offset)
+                    .limit(limit)
+                ).all()
+            )
         finally:
             self._close_session(session)
 
@@ -107,12 +104,14 @@ class RequestLogRepository(BaseRepository):
         """Get request logs for a specific token."""
         session = self._get_session()
         try:
-            return list(session.exec(
-                select(RequestLog)
-                .where(RequestLog.token_id == token_id)
-                .order_by(col(RequestLog.timestamp).desc())
-                .limit(limit)
-            ).all())
+            return list(
+                session.exec(
+                    select(RequestLog)
+                    .where(RequestLog.token_id == token_id)
+                    .order_by(col(RequestLog.timestamp).desc())
+                    .limit(limit)
+                ).all()
+            )
         finally:
             self._close_session(session)
 
@@ -120,12 +119,14 @@ class RequestLogRepository(BaseRepository):
         """Get error request logs (status >= 400)."""
         session = self._get_session()
         try:
-            return list(session.exec(
-                select(RequestLog)
-                .where(RequestLog.status_code >= 400)
-                .order_by(col(RequestLog.timestamp).desc())
-                .limit(limit)
-            ).all())
+            return list(
+                session.exec(
+                    select(RequestLog)
+                    .where(RequestLog.status_code >= 400)
+                    .order_by(col(RequestLog.timestamp).desc())
+                    .limit(limit)
+                ).all()
+            )
         finally:
             self._close_session(session)
 
@@ -136,41 +137,28 @@ class RequestLogRepository(BaseRepository):
         session = self._get_session()
         try:
             # Total requests
-            total = session.exec(
-                select(func.count(RequestLog.id)).where(RequestLog.timestamp >= since)
-            ).one()
+            total = session.exec(select(func.count(RequestLog.id)).where(RequestLog.timestamp >= since)).one()
 
             # Successful requests (status < 400)
             successful = session.exec(
-                select(func.count(RequestLog.id)).where(
-                    RequestLog.timestamp >= since,
-                    RequestLog.status_code < 400
-                )
+                select(func.count(RequestLog.id)).where(RequestLog.timestamp >= since, RequestLog.status_code < 400)
             ).one()
 
             # Cache hits
             cache_hits = session.exec(
-                select(func.count(RequestLog.id)).where(
-                    RequestLog.timestamp >= since,
-                    RequestLog.from_cache == True
-                )
+                select(func.count(RequestLog.id)).where(RequestLog.timestamp >= since, RequestLog.from_cache == True)
             ).one()
 
             # Average processing time
             avg_time = session.exec(
                 select(func.avg(RequestLog.processing_time_ms)).where(
-                    RequestLog.timestamp >= since,
-                    RequestLog.processing_time_ms.is_not(None)
+                    RequestLog.timestamp >= since, RequestLog.processing_time_ms.is_not(None)
                 )
             ).one()
 
             # Requests by model
             model_stats = session.exec(
-                select(
-                    Model.code,
-                    func.count(RequestLog.id),
-                    func.avg(RequestLog.processing_time_ms)
-                )
+                select(Model.code, func.count(RequestLog.id), func.avg(RequestLog.processing_time_ms))
                 .join(Model)
                 .where(RequestLog.timestamp >= since)
                 .group_by(Model.code)
@@ -179,11 +167,7 @@ class RequestLogRepository(BaseRepository):
 
             # Requests by endpoint
             endpoint_stats = session.exec(
-                select(
-                    RequestLog.endpoint,
-                    RequestLog.method,
-                    func.count(RequestLog.id)
-                )
+                select(RequestLog.endpoint, RequestLog.method, func.count(RequestLog.id))
                 .where(RequestLog.timestamp >= since)
                 .group_by(RequestLog.endpoint, RequestLog.method)
                 .order_by(func.count(RequestLog.id).desc())
@@ -208,20 +192,11 @@ class RequestLogRepository(BaseRepository):
                 "avg_processing_time_ms": round(avg_time, 2) if avg_time else 0,
                 "requests_per_hour": round(total / hours, 2) if hours > 0 else 0,
                 "models": {
-                    code: {
-                        "count": count,
-                        "avg_time_ms": round(avg_t, 2) if avg_t else 0
-                    }
+                    code: {"count": count, "avg_time_ms": round(avg_t, 2) if avg_t else 0}
                     for code, count, avg_t in model_stats
                 },
-                "endpoints": {
-                    f"{method} {endpoint}": count
-                    for endpoint, method, count in endpoint_stats
-                },
-                "errors": {
-                    str(status): count
-                    for status, count in error_stats
-                },
+                "endpoints": {f"{method} {endpoint}": count for endpoint, method, count in endpoint_stats},
+                "errors": {str(status): count for status, count in error_stats},
             }
         finally:
             self._close_session(session)
@@ -232,9 +207,7 @@ class RequestLogRepository(BaseRepository):
 
         session = self._get_session()
         try:
-            model = session.exec(
-                select(Model).where(Model.code == model_code)
-            ).first()
+            model = session.exec(select(Model).where(Model.code == model_code)).first()
 
             if not model:
                 return {}
@@ -248,8 +221,7 @@ class RequestLogRepository(BaseRepository):
                     func.min(RequestLog.processing_time_ms),
                     func.max(RequestLog.processing_time_ms),
                     func.avg(RequestLog.text_length),
-                )
-                .where(RequestLog.model_id == model.id, RequestLog.timestamp >= since)
+                ).where(RequestLog.model_id == model.id, RequestLog.timestamp >= since)
             ).first()
 
             total = stats[0] or 0
@@ -285,9 +257,7 @@ class RequestLogRepository(BaseRepository):
 
         session = self._get_session()
         try:
-            old_entries = list(session.exec(
-                select(RequestLog).where(RequestLog.timestamp < cutoff)
-            ).all())
+            old_entries = list(session.exec(select(RequestLog).where(RequestLog.timestamp < cutoff)).all())
 
             count = len(old_entries)
             for entry in old_entries:

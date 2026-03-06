@@ -32,11 +32,9 @@ jobs:
 
       - name: Run Ruff linter
         run: uvx ruff check app/ --output-format=github
-        continue-on-error: true
 
       - name: Run Ruff formatter check
         run: uvx ruff format app/ --check
-        continue-on-error: true
 
   # ===========================================
   # Unit Tests
@@ -124,7 +122,7 @@ jobs:
       contents: read
       packages: write
     outputs:
-      image_name: ${{ steps.lower.outputs.image_name }}
+      image: ${{ steps.lower.outputs.image }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -134,7 +132,7 @@ jobs:
         run: |
           IMAGE_NAME=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')
           echo "IMAGE_NAME=$IMAGE_NAME" >> "$GITHUB_ENV"
-          echo "image_name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "image=${{ env.REGISTRY }}/$IMAGE_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -186,7 +184,7 @@ jobs:
     needs: build
     services:
       pyhellen:
-        image: ${{ env.REGISTRY }}/${{ needs.build.outputs.image_name }}:${{ github.sha }}
+        image: ${{ needs.build.outputs.image }}:${{ github.sha }}
         ports:
           - 8000:8000
         options: >-

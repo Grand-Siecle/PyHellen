@@ -36,6 +36,7 @@ class DatabaseManager:
             return
 
         from app.core.settings import settings
+
         self.db_path = Path(db_path or settings.token_db_path)
         self._local = threading.local()
         self._initialized = True
@@ -80,9 +81,7 @@ class DatabaseManager:
             """)
 
             # Check current version
-            current_version = conn.execute(
-                "SELECT MAX(version) FROM schema_migrations"
-            ).fetchone()[0] or 0
+            current_version = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] or 0
 
             if current_version < self._schema_version:
                 self._apply_migrations(conn, current_version)
@@ -98,7 +97,7 @@ class DatabaseManager:
                     conn.execute(sql)
                 conn.execute(
                     "INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, datetime('now'), ?)",
-                    (version, description)
+                    (version, description),
                 )
 
         logger.info(f"Database migrated to version {self._schema_version}")
@@ -106,9 +105,11 @@ class DatabaseManager:
     def _get_migrations(self) -> dict:
         """Return all database migrations."""
         return {
-            1: ("Initial schema", [
-                # Tokens table (existing, preserved)
-                """
+            1: (
+                "Initial schema",
+                [
+                    # Tokens table (existing, preserved)
+                    """
                 CREATE TABLE IF NOT EXISTS tokens (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
@@ -120,11 +121,10 @@ class DatabaseManager:
                     is_active INTEGER DEFAULT 1
                 )
                 """,
-                "CREATE INDEX IF NOT EXISTS idx_token_hash ON tokens(token_hash)",
-                "CREATE INDEX IF NOT EXISTS idx_tokens_active ON tokens(is_active)",
-
-                # Models table (replaces hardcoded PieLanguage enum)
-                """
+                    "CREATE INDEX IF NOT EXISTS idx_token_hash ON tokens(token_hash)",
+                    "CREATE INDEX IF NOT EXISTS idx_tokens_active ON tokens(is_active)",
+                    # Models table (replaces hardcoded PieLanguage enum)
+                    """
                 CREATE TABLE IF NOT EXISTS models (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     code TEXT NOT NULL UNIQUE,
@@ -139,11 +139,10 @@ class DatabaseManager:
                     updated_at TEXT NOT NULL
                 )
                 """,
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_models_code ON models(code)",
-                "CREATE INDEX IF NOT EXISTS idx_models_active ON models(is_active)",
-
-                # Model files metadata
-                """
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_models_code ON models(code)",
+                    "CREATE INDEX IF NOT EXISTS idx_models_active ON models(is_active)",
+                    # Model files metadata
+                    """
                 CREATE TABLE IF NOT EXISTS model_files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     model_id INTEGER NOT NULL,
@@ -157,10 +156,9 @@ class DatabaseManager:
                     UNIQUE(model_id, filename)
                 )
                 """,
-                "CREATE INDEX IF NOT EXISTS idx_model_files_model ON model_files(model_id)",
-
-                # Model metrics
-                """
+                    "CREATE INDEX IF NOT EXISTS idx_model_files_model ON model_files(model_id)",
+                    # Model metrics
+                    """
                 CREATE TABLE IF NOT EXISTS model_metrics (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     model_id INTEGER NOT NULL UNIQUE,
@@ -178,9 +176,8 @@ class DatabaseManager:
                     FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
                 )
                 """,
-
-                # Cache entries
-                """
+                    # Cache entries
+                    """
                 CREATE TABLE IF NOT EXISTS cache_entries (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     cache_key TEXT NOT NULL UNIQUE,
@@ -196,12 +193,11 @@ class DatabaseManager:
                     FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
                 )
                 """,
-                "CREATE INDEX IF NOT EXISTS idx_cache_key ON cache_entries(cache_key)",
-                "CREATE INDEX IF NOT EXISTS idx_cache_model ON cache_entries(model_id)",
-                "CREATE INDEX IF NOT EXISTS idx_cache_expires ON cache_entries(expires_at)",
-
-                # Request log
-                """
+                    "CREATE INDEX IF NOT EXISTS idx_cache_key ON cache_entries(cache_key)",
+                    "CREATE INDEX IF NOT EXISTS idx_cache_model ON cache_entries(model_id)",
+                    "CREATE INDEX IF NOT EXISTS idx_cache_expires ON cache_entries(expires_at)",
+                    # Request log
+                    """
                 CREATE TABLE IF NOT EXISTS request_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
@@ -220,11 +216,10 @@ class DatabaseManager:
                     FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE SET NULL
                 )
                 """,
-                "CREATE INDEX IF NOT EXISTS idx_request_timestamp ON request_log(timestamp)",
-                "CREATE INDEX IF NOT EXISTS idx_request_model ON request_log(model_id)",
-
-                # Audit log
-                """
+                    "CREATE INDEX IF NOT EXISTS idx_request_timestamp ON request_log(timestamp)",
+                    "CREATE INDEX IF NOT EXISTS idx_request_model ON request_log(model_id)",
+                    # Audit log
+                    """
                 CREATE TABLE IF NOT EXISTS audit_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
@@ -235,42 +230,56 @@ class DatabaseManager:
                     details_json TEXT,
                     client_ip TEXT,
                     success INTEGER DEFAULT 1,
-                    FOREIGN KEY (actor_token_id) REFERENCES tokens(id) ON DELETE SET NULL
+                    FOREIGN KEY (actor_token_id) REFERENCES tokens(id)
+                        ON DELETE SET NULL
                 )
                 """,
-                "CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)",
-                "CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action)",
-
-                # App state (key-value store)
-                """
+                    "CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)",
+                    "CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action)",
+                    # App state (key-value store)
+                    """
                 CREATE TABLE IF NOT EXISTS app_state (
                     key TEXT PRIMARY KEY,
                     value_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
                 """,
-
-                # Insert default models (builtin)
-                """
-                INSERT OR IGNORE INTO models (code, name, description, pie_module, is_active, is_builtin, priority, created_at, updated_at)
+                    # Insert default models (builtin)
+                    """
+                INSERT OR IGNORE INTO models
+                    (code, name, description, pie_module,
+                     is_active, is_builtin, priority, created_at, updated_at)
                 VALUES
-                    ('lasla', 'Classical Latin', 'Tagger for Classical Latin texts', 'lasla', 1, 1, 1, datetime('now'), datetime('now')),
-                    ('grc', 'Ancient Greek', 'Tagger for Ancient Greek texts', 'grc', 1, 1, 2, datetime('now'), datetime('now')),
-                    ('fro', 'Old French', 'Tagger for Old French texts', 'fro', 1, 1, 3, datetime('now'), datetime('now')),
-                    ('freem', 'Early Modern French', 'Tagger for Early Modern French texts', 'freem', 1, 1, 4, datetime('now'), datetime('now')),
-                    ('fr', 'Classical French', 'Tagger for Classical French texts', 'fr', 1, 1, 5, datetime('now'), datetime('now')),
-                    ('dum', 'Old Dutch', 'Tagger for Old Dutch texts', 'dum', 1, 1, 6, datetime('now'), datetime('now')),
-                    ('occ_cont', 'Occitan Contemporain', 'Tagger for Contemporary Occitan texts', 'occ_cont', 1, 1, 7, datetime('now'), datetime('now'))
+                    ('lasla', 'Classical Latin',
+                     'Tagger for Classical Latin texts', 'lasla',
+                     1, 1, 1, datetime('now'), datetime('now')),
+                    ('grc', 'Ancient Greek',
+                     'Tagger for Ancient Greek texts', 'grc',
+                     1, 1, 2, datetime('now'), datetime('now')),
+                    ('fro', 'Old French',
+                     'Tagger for Old French texts', 'fro',
+                     1, 1, 3, datetime('now'), datetime('now')),
+                    ('freem', 'Early Modern French',
+                     'Tagger for Early Modern French texts', 'freem',
+                     1, 1, 4, datetime('now'), datetime('now')),
+                    ('fr', 'Classical French',
+                     'Tagger for Classical French texts', 'fr',
+                     1, 1, 5, datetime('now'), datetime('now')),
+                    ('dum', 'Old Dutch',
+                     'Tagger for Old Dutch texts', 'dum',
+                     1, 1, 6, datetime('now'), datetime('now')),
+                    ('occ_cont', 'Occitan Contemporain',
+                     'Tagger for Contemporary Occitan texts', 'occ_cont',
+                     1, 1, 7, datetime('now'), datetime('now'))
                 """,
-            ])
+                ],
+            )
         }
 
     def get_schema_version(self) -> int:
         """Get current schema version."""
         with self.get_connection() as conn:
-            result = conn.execute(
-                "SELECT MAX(version) FROM schema_migrations"
-            ).fetchone()[0]
+            result = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
             return result or 0
 
 

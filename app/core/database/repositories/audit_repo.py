@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from sqlmodel import Session, select, func, col
+from sqlmodel import select, func, col
 
 from app.core.database.models import AuditLog
 from app.core.database.repositories.base import BaseRepository
@@ -13,6 +13,7 @@ from app.core.logger import logger
 
 class AuditAction:
     """Standard audit action constants."""
+
     # Token actions
     TOKEN_CREATED = "token.created"
     TOKEN_REVOKED = "token.revoked"
@@ -62,7 +63,7 @@ class AuditRepository(BaseRepository):
         target_id: Optional[str] = None,
         details: Optional[Dict[str, Any]] = None,
         client_ip: Optional[str] = None,
-        success: bool = True
+        success: bool = True,
     ) -> int:
         """
         Log an audit event.
@@ -93,12 +94,11 @@ class AuditRepository(BaseRepository):
         """Get recent audit entries."""
         session = self._get_session()
         try:
-            return list(session.exec(
-                select(AuditLog)
-                .order_by(col(AuditLog.timestamp).desc())
-                .offset(offset)
-                .limit(limit)
-            ).all())
+            return list(
+                session.exec(
+                    select(AuditLog).order_by(col(AuditLog.timestamp).desc()).offset(offset).limit(limit)
+                ).all()
+            )
         finally:
             self._close_session(session)
 
@@ -106,12 +106,14 @@ class AuditRepository(BaseRepository):
         """Get audit entries by action type."""
         session = self._get_session()
         try:
-            return list(session.exec(
-                select(AuditLog)
-                .where(AuditLog.action == action)
-                .order_by(col(AuditLog.timestamp).desc())
-                .limit(limit)
-            ).all())
+            return list(
+                session.exec(
+                    select(AuditLog)
+                    .where(AuditLog.action == action)
+                    .order_by(col(AuditLog.timestamp).desc())
+                    .limit(limit)
+                ).all()
+            )
         finally:
             self._close_session(session)
 
@@ -119,21 +121,18 @@ class AuditRepository(BaseRepository):
         """Get audit entries by actor token ID."""
         session = self._get_session()
         try:
-            return list(session.exec(
-                select(AuditLog)
-                .where(AuditLog.actor_token_id == token_id)
-                .order_by(col(AuditLog.timestamp).desc())
-                .limit(limit)
-            ).all())
+            return list(
+                session.exec(
+                    select(AuditLog)
+                    .where(AuditLog.actor_token_id == token_id)
+                    .order_by(col(AuditLog.timestamp).desc())
+                    .limit(limit)
+                ).all()
+            )
         finally:
             self._close_session(session)
 
-    def get_by_target(
-        self,
-        target_type: str,
-        target_id: Optional[str] = None,
-        limit: int = 100
-    ) -> List[AuditLog]:
+    def get_by_target(self, target_type: str, target_id: Optional[str] = None, limit: int = 100) -> List[AuditLog]:
         """Get audit entries by target type and optionally ID."""
         session = self._get_session()
         try:
@@ -146,21 +145,18 @@ class AuditRepository(BaseRepository):
         finally:
             self._close_session(session)
 
-    def get_by_date_range(
-        self,
-        start_date: datetime,
-        end_date: datetime,
-        limit: int = 1000
-    ) -> List[AuditLog]:
+    def get_by_date_range(self, start_date: datetime, end_date: datetime, limit: int = 1000) -> List[AuditLog]:
         """Get audit entries within a date range."""
         session = self._get_session()
         try:
-            return list(session.exec(
-                select(AuditLog)
-                .where(AuditLog.timestamp >= start_date, AuditLog.timestamp <= end_date)
-                .order_by(col(AuditLog.timestamp).desc())
-                .limit(limit)
-            ).all())
+            return list(
+                session.exec(
+                    select(AuditLog)
+                    .where(AuditLog.timestamp >= start_date, AuditLog.timestamp <= end_date)
+                    .order_by(col(AuditLog.timestamp).desc())
+                    .limit(limit)
+                ).all()
+            )
         finally:
             self._close_session(session)
 
@@ -168,12 +164,14 @@ class AuditRepository(BaseRepository):
         """Get failed audit entries."""
         session = self._get_session()
         try:
-            return list(session.exec(
-                select(AuditLog)
-                .where(AuditLog.success == False)
-                .order_by(col(AuditLog.timestamp).desc())
-                .limit(limit)
-            ).all())
+            return list(
+                session.exec(
+                    select(AuditLog)
+                    .where(AuditLog.success == False)
+                    .order_by(col(AuditLog.timestamp).desc())
+                    .limit(limit)
+                ).all()
+            )
         finally:
             self._close_session(session)
 
@@ -183,16 +181,14 @@ class AuditRepository(BaseRepository):
 
         session = self._get_session()
         try:
-            return list(session.exec(
-                select(AuditLog)
-                .where(
-                    AuditLog.action.like("auth.%"),
-                    AuditLog.success == False,
-                    AuditLog.timestamp >= since
-                )
-                .order_by(col(AuditLog.timestamp).desc())
-                .limit(limit)
-            ).all())
+            return list(
+                session.exec(
+                    select(AuditLog)
+                    .where(AuditLog.action.like("auth.%"), AuditLog.success == False, AuditLog.timestamp >= since)
+                    .order_by(col(AuditLog.timestamp).desc())
+                    .limit(limit)
+                ).all()
+            )
         finally:
             self._close_session(session)
 
@@ -202,15 +198,10 @@ class AuditRepository(BaseRepository):
 
         session = self._get_session()
         try:
-            total = session.exec(
-                select(func.count(AuditLog.id)).where(AuditLog.timestamp >= since)
-            ).one()
+            total = session.exec(select(func.count(AuditLog.id)).where(AuditLog.timestamp >= since)).one()
 
             failed = session.exec(
-                select(func.count(AuditLog.id)).where(
-                    AuditLog.timestamp >= since,
-                    AuditLog.success == False
-                )
+                select(func.count(AuditLog.id)).where(AuditLog.timestamp >= since, AuditLog.success == False)
             ).one()
 
             # Actions breakdown
@@ -228,7 +219,7 @@ class AuditRepository(BaseRepository):
                     AuditLog.timestamp >= since,
                     AuditLog.action.like("auth.%"),
                     AuditLog.success == False,
-                    AuditLog.client_ip.is_not(None)
+                    AuditLog.client_ip.is_not(None),
                 )
                 .group_by(AuditLog.client_ip)
                 .order_by(func.count(AuditLog.id).desc())
@@ -256,9 +247,7 @@ class AuditRepository(BaseRepository):
 
         session = self._get_session()
         try:
-            old_entries = list(session.exec(
-                select(AuditLog).where(AuditLog.timestamp < cutoff)
-            ).all())
+            old_entries = list(session.exec(select(AuditLog).where(AuditLog.timestamp < cutoff)).all())
 
             count = len(old_entries)
             for entry in old_entries:

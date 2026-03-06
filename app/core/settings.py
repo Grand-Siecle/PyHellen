@@ -1,6 +1,5 @@
-import secrets
 import semver
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator
 
@@ -8,11 +7,7 @@ from pydantic import Field, field_validator
 class Settings(BaseSettings):
     """Application settings with environment variable support."""
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # App metadata
     title_app: str = "Hellen"
@@ -25,84 +20,44 @@ class Settings(BaseSettings):
     # Security Settings
     # ===================
     auth_enabled: bool = Field(
-        default=False,
-        description="Enable token-based authentication. When False, API is publicly accessible."
+        default=False, description="Enable token-based authentication. When False, API is publicly accessible."
     )
     secret_key: str = Field(
         default="",
         description="Secret key for token hashing. REQUIRED if auth_enabled=True. "
-                    "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+        'Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"',
     )
-    token_db_path: str = Field(
-        default="tokens.db",
-        description="Path to SQLite database for token storage"
-    )
+    token_db_path: str = Field(default="tokens.db", description="Path to SQLite database for token storage")
     auto_create_admin_token: bool = Field(
-        default=True,
-        description="Automatically create admin token on first run if no tokens exist"
+        default=True, description="Automatically create admin token on first run if no tokens exist"
     )
 
     # CORS Settings
-    cors_origins: List[str] = Field(
-        default=["*"],
-        description="Allowed CORS origins. Use ['*'] for development only!"
-    )
+    cors_origins: List[str] = Field(default=["*"], description="Allowed CORS origins. Use ['*'] for development only!")
     cors_allow_credentials: bool = Field(
-        default=False,
-        description="Allow credentials in CORS. Cannot be True if cors_origins contains '*'"
+        default=False, description="Allow credentials in CORS. Cannot be True if cors_origins contains '*'"
     )
 
     # Rate Limiting (optional)
-    rate_limit_enabled: bool = Field(
-        default=False,
-        description="Enable rate limiting"
-    )
-    rate_limit_requests: int = Field(
-        default=100,
-        ge=1,
-        description="Maximum requests per time window"
-    )
-    rate_limit_window_seconds: int = Field(
-        default=60,
-        ge=1,
-        description="Rate limit time window in seconds"
-    )
+    rate_limit_enabled: bool = Field(default=False, description="Enable rate limiting")
+    rate_limit_requests: int = Field(default=100, ge=1, description="Maximum requests per time window")
+    rate_limit_window_seconds: int = Field(default=60, ge=1, description="Rate limit time window in seconds")
 
     # Model management
     preload_models: List[str] = Field(
-        default_factory=list,
-        description="Models to preload at startup (e.g., ['lasla', 'grc'])"
+        default_factory=list, description="Models to preload at startup (e.g., ['lasla', 'grc'])"
     )
 
     # Download settings
-    download_timeout_seconds: int = Field(
-        default=300,
-        ge=30,
-        description="Timeout for model downloads in seconds"
-    )
-    download_max_retries: int = Field(
-        default=3,
-        ge=1,
-        description="Maximum retry attempts for failed downloads"
-    )
+    download_timeout_seconds: int = Field(default=300, ge=30, description="Timeout for model downloads in seconds")
+    download_max_retries: int = Field(default=3, ge=1, description="Maximum retry attempts for failed downloads")
 
     # Processing settings
-    max_concurrent_processing: int = Field(
-        default=10,
-        ge=1,
-        description="Maximum concurrent text processing tasks"
-    )
-    batch_size: int = Field(
-        default=256,
-        ge=1,
-        description="Batch size for model processing"
-    )
+    max_concurrent_processing: int = Field(default=10, ge=1, description="Maximum concurrent text processing tasks")
+    batch_size: int = Field(default=256, ge=1, description="Batch size for model processing")
 
     # Metrics
-    enable_metrics: bool = Field(
-        default=True,
-        description="Enable metrics collection"
-    )
+    enable_metrics: bool = Field(default=True, description="Enable metrics collection")
 
     @field_validator("secret_key", mode="before")
     @classmethod
