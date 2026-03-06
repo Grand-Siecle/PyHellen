@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
             enabled=settings.auth_enabled,
             secret_key=settings.secret_key,
             db_path=settings.token_db_path,
-            auto_create_admin=settings.auto_create_admin_token
+            auto_create_admin=settings.auto_create_admin_token,
         )
         app.state.auth_manager = auth_manager
 
@@ -172,9 +172,7 @@ def create_application() -> FastAPI:
             routes=app.routes,
         )
 
-        openapi_schema["info"]["x-logo"] = {
-            "url": "/static/logo.png"
-        }
+        openapi_schema["info"]["x-logo"] = {"url": "/static/logo.png"}
 
         # Add security scheme if auth is enabled
         if settings.auth_enabled:
@@ -184,19 +182,16 @@ def create_application() -> FastAPI:
                     "type": "http",
                     "scheme": "bearer",
                     "bearerFormat": "Token",
-                    "description": "API token obtained from admin endpoints"
+                    "description": "API token obtained from admin endpoints",
                 },
                 "ApiKeyAuth": {
                     "type": "apiKey",
                     "in": "header",
                     "name": "X-API-Key",
-                    "description": "API key in X-API-Key header"
-                }
+                    "description": "API key in X-API-Key header",
+                },
             }
-            openapi_schema["security"] = [
-                {"BearerAuth": []},
-                {"ApiKeyAuth": []}
-            ]
+            openapi_schema["security"] = [{"BearerAuth": []}, {"ApiKeyAuth": []}]
 
         app.openapi_schema = openapi_schema
         return app.openapi_schema

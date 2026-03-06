@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class PieLanguage(str, Enum):
     """Supported languages for PIE Extended tagging."""
+
     lasla = "Classical Latin"
     grc = "Ancient Greek"
     fro = "Old French"
@@ -24,26 +25,27 @@ class PieLanguage(str, Enum):
 
 class SupportedLanguages(BaseModel):
     """Response model for supported languages."""
+
     languages: List[PieLanguage]
     count: int = Field(default=0, description="Number of supported languages")
 
     def __init__(self, **data):
         super().__init__(**data)
-        object.__setattr__(self, 'count', len(self.languages))
+        object.__setattr__(self, "count", len(self.languages))
 
 
 class ModelStatusSchema(BaseModel):
     """Status information for a single model."""
+
     language: str = Field(..., description="Human-readable language name")
-    status: Literal["loaded", "loading", "not loaded", "downloading"] = Field(
-        ..., description="Current model status"
-    )
+    status: Literal["loaded", "loading", "not loaded", "downloading"] = Field(..., description="Current model status")
     files: Optional[List[str]] = Field(None, description="List of model files")
     message: Optional[str] = Field(None, description="Additional status message")
 
 
 class ModelFileInfo(BaseModel):
     """Information about a model file."""
+
     name: str = Field(..., description="File name")
     url: str = Field(..., description="Download URL")
     size_mb: Optional[float] = Field(None, description="File size in MB")
@@ -52,6 +54,7 @@ class ModelFileInfo(BaseModel):
 
 class ModelDetailSchema(BaseModel):
     """Detailed information about a model."""
+
     name: str = Field(..., description="Model name/code")
     language: str = Field(..., description="Human-readable language name")
     status: str = Field(..., description="Current status")
@@ -64,6 +67,7 @@ class ModelDetailSchema(BaseModel):
 
 class TagToken(BaseModel):
     """A single tagged token."""
+
     form: str = Field(..., description="Original token form")
     lemma: Optional[str] = Field(None, description="Lemma")
     pos: Optional[str] = Field(None, description="Part of speech")
@@ -72,6 +76,7 @@ class TagToken(BaseModel):
 
 class TagResult(BaseModel):
     """Result of tagging operation."""
+
     tokens: List[Dict[str, Any]] = Field(..., description="Tagged tokens")
     text_preview: Optional[str] = Field(None, description="Preview of input text")
     processing_time_ms: float = Field(..., description="Processing time in milliseconds")
@@ -81,6 +86,7 @@ class TagResult(BaseModel):
 
 class BatchTagResult(BaseModel):
     """Result of batch tagging operation."""
+
     results: List[List[Dict[str, Any]]] = Field(..., description="Results for each text")
     total_texts: int = Field(..., description="Number of texts processed")
     processing_time_ms: float = Field(..., description="Total processing time")
@@ -90,6 +96,7 @@ class BatchTagResult(BaseModel):
 
 class CacheStats(BaseModel):
     """Cache statistics."""
+
     size: int = Field(..., description="Current number of entries")
     max_size: int = Field(..., description="Maximum cache size")
     ttl_seconds: int = Field(..., description="Time-to-live in seconds")

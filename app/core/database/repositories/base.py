@@ -26,6 +26,7 @@ class BaseRepository:
         """Lazy load database engine."""
         if self._engine is None:
             from app.core.database.engine import get_db_engine
+
             self._engine = get_db_engine()
         return self._engine
 

@@ -16,6 +16,7 @@ from app.core.logger import logger
 
 class TokenScope(str, Enum):
     """Available token scopes."""
+
     READ = "read"
     WRITE = "write"
     ADMIN = "admin"
@@ -47,11 +48,7 @@ class TokenRepository(BaseRepository):
         return token
 
     def create(
-        self,
-        name: str,
-        scopes: List[TokenScope],
-        secret_key: str,
-        expires_days: Optional[int] = None
+        self, name: str, scopes: List[TokenScope], secret_key: str, expires_days: Optional[int] = None
     ) -> Tuple[Token, str]:
         """
         Create a new token.
@@ -103,12 +100,7 @@ class TokenRepository(BaseRepository):
 
         session = self._get_session()
         try:
-            token = session.exec(
-                select(Token).where(
-                    Token.token_hash == token_hash,
-                    Token.is_active == True
-                )
-            ).first()
+            token = session.exec(select(Token).where(Token.token_hash == token_hash, Token.is_active == True)).first()
 
             if not token:
                 return None
@@ -132,9 +124,7 @@ class TokenRepository(BaseRepository):
         """List all tokens (without sensitive hash data)."""
         session = self._get_session()
         try:
-            tokens = list(session.exec(
-                select(Token).order_by(Token.created_at.desc())
-            ).all())
+            tokens = list(session.exec(select(Token).order_by(Token.created_at.desc())).all())
 
             return [self._token_to_response(t) for t in tokens]
         finally:
@@ -186,12 +176,9 @@ class TokenRepository(BaseRepository):
 
         session = self._get_session()
         try:
-            expired = list(session.exec(
-                select(Token).where(
-                    Token.expires_at.is_not(None),
-                    Token.expires_at < now
-                )
-            ).all())
+            expired = list(
+                session.exec(select(Token).where(Token.expires_at.is_not(None), Token.expires_at < now)).all()
+            )
 
             count = len(expired)
             for token in expired:
@@ -209,22 +196,12 @@ class TokenRepository(BaseRepository):
         session = self._get_session()
         try:
             total = session.exec(select(func.count(Token.id))).one()
-            active = session.exec(
-                select(func.count(Token.id)).where(Token.is_active == True)
-            ).one()
+            active = session.exec(select(func.count(Token.id)).where(Token.is_active == True)).one()
             expired = session.exec(
-                select(func.count(Token.id)).where(
-                    Token.expires_at.is_not(None),
-                    Token.expires_at < datetime.utcnow()
-                )
+                select(func.count(Token.id)).where(Token.expires_at.is_not(None), Token.expires_at < datetime.utcnow())
             ).one()
 
-            return {
-                "total": total,
-                "active": active,
-                "inactive": total - active,
-                "expired": expired
-            }
+            return {"total": total, "active": active, "inactive": total - active, "expired": expired}
         finally:
             self._close_session(session)
 

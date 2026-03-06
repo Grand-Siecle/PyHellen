@@ -14,8 +14,10 @@ from sqlmodel import SQLModel, Field, Relationship
 # Model Management
 # ==================
 
+
 class ModelBase(SQLModel):
     """Base model fields shared between create and read."""
+
     code: str = Field(unique=True, index=True)
     name: str
     description: Optional[str] = None
@@ -28,6 +30,7 @@ class ModelBase(SQLModel):
 
 class Model(ModelBase, table=True):
     """NLP Model definition stored in database."""
+
     __tablename__ = "models"
 
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -42,11 +45,13 @@ class Model(ModelBase, table=True):
 
 class ModelCreate(ModelBase):
     """Schema for creating a new model."""
+
     pass
 
 
 class ModelRead(ModelBase):
     """Schema for reading a model."""
+
     id: int
     created_at: datetime
     updated_at: datetime
@@ -54,6 +59,7 @@ class ModelRead(ModelBase):
 
 class ModelUpdate(SQLModel):
     """Schema for updating a model."""
+
     name: Optional[str] = None
     description: Optional[str] = None
     pie_module: Optional[str] = None
@@ -65,8 +71,10 @@ class ModelUpdate(SQLModel):
 # Model Files
 # ==================
 
+
 class ModelFileBase(SQLModel):
     """Base fields for model files."""
+
     filename: str
     url: str
     size_bytes: Optional[int] = None
@@ -75,6 +83,7 @@ class ModelFileBase(SQLModel):
 
 class ModelFile(ModelFileBase, table=True):
     """Model file metadata."""
+
     __tablename__ = "model_files"
 
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -90,8 +99,10 @@ class ModelFile(ModelFileBase, table=True):
 # Model Metrics
 # ==================
 
+
 class ModelMetrics(SQLModel, table=True):
     """Metrics for model usage."""
+
     __tablename__ = "model_metrics"
 
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -128,8 +139,10 @@ class ModelMetrics(SQLModel, table=True):
 # Cache
 # ==================
 
+
 class CacheEntry(SQLModel, table=True):
     """Cached tagging result."""
+
     __tablename__ = "cache_entries"
 
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -152,8 +165,10 @@ class CacheEntry(SQLModel, table=True):
 # Tokens
 # ==================
 
+
 class Token(SQLModel, table=True):
     """API access token."""
+
     __tablename__ = "tokens"
 
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -168,6 +183,7 @@ class Token(SQLModel, table=True):
 
 class TokenCreate(SQLModel):
     """Schema for creating a token."""
+
     name: str
     scopes: List[str] = Field(default_factory=lambda: ["read"])
     expires_in_days: Optional[int] = None
@@ -177,8 +193,10 @@ class TokenCreate(SQLModel):
 # Request Log
 # ==================
 
+
 class RequestLog(SQLModel, table=True):
     """HTTP request log entry."""
+
     __tablename__ = "request_log"
 
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -200,8 +218,10 @@ class RequestLog(SQLModel, table=True):
 # Audit Log
 # ==================
 
+
 class AuditLog(SQLModel, table=True):
     """Audit trail entry."""
+
     __tablename__ = "audit_log"
 
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -219,8 +239,10 @@ class AuditLog(SQLModel, table=True):
 # App State
 # ==================
 
+
 class AppState(SQLModel, table=True):
     """Key-value application state."""
+
     __tablename__ = "app_state"
 
     key: str = Field(primary_key=True)
@@ -232,8 +254,10 @@ class AppState(SQLModel, table=True):
 # Schema Migrations
 # ==================
 
+
 class SchemaMigration(SQLModel, table=True):
     """Track applied database migrations."""
+
     __tablename__ = "schema_migrations"
 
     version: int = Field(primary_key=True)

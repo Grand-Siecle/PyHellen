@@ -54,9 +54,7 @@ class ModelRepository:
         """Get a model by its code."""
         session = self._get_session()
         try:
-            return session.exec(
-                select(Model).where(Model.code == code)
-            ).first()
+            return session.exec(select(Model).where(Model.code == code)).first()
         finally:
             self._close_session(session)
 
@@ -72,9 +70,7 @@ class ModelRepository:
         """Check if a model code is valid and active."""
         session = self._get_session()
         try:
-            result = session.exec(
-                select(Model.id).where(Model.code == code, Model.is_active == True)
-            ).first()
+            result = session.exec(select(Model.id).where(Model.code == code, Model.is_active == True)).first()
             return result is not None
         finally:
             self._close_session(session)
@@ -83,9 +79,7 @@ class ModelRepository:
         """Get list of active model codes (for validation)."""
         session = self._get_session()
         try:
-            results = session.exec(
-                select(Model.code).where(Model.is_active == True).order_by(Model.priority)
-            ).all()
+            results = session.exec(select(Model.code).where(Model.is_active == True).order_by(Model.priority)).all()
             return list(results)
         finally:
             self._close_session(session)
@@ -132,9 +126,7 @@ class ModelRepository:
         """Update a model's properties."""
         session = self._get_session()
         try:
-            model = session.exec(
-                select(Model).where(Model.code == code)
-            ).first()
+            model = session.exec(select(Model).where(Model.code == code)).first()
 
             if not model:
                 return None
@@ -163,9 +155,7 @@ class ModelRepository:
         """Activate a model."""
         session = self._get_session()
         try:
-            model = session.exec(
-                select(Model).where(Model.code == code)
-            ).first()
+            model = session.exec(select(Model).where(Model.code == code)).first()
 
             if not model:
                 return False
@@ -183,9 +173,7 @@ class ModelRepository:
         """Deactivate a model."""
         session = self._get_session()
         try:
-            model = session.exec(
-                select(Model).where(Model.code == code)
-            ).first()
+            model = session.exec(select(Model).where(Model.code == code)).first()
 
             if not model:
                 return False
@@ -207,9 +195,7 @@ class ModelRepository:
         """
         session = self._get_session()
         try:
-            model = session.exec(
-                select(Model).where(Model.code == code)
-            ).first()
+            model = session.exec(select(Model).where(Model.code == code)).first()
 
             if not model:
                 return False
@@ -229,16 +215,12 @@ class ModelRepository:
         """Get all files for a model."""
         session = self._get_session()
         try:
-            model = session.exec(
-                select(Model).where(Model.code == code)
-            ).first()
+            model = session.exec(select(Model).where(Model.code == code)).first()
 
             if not model:
                 return []
 
-            return list(session.exec(
-                select(ModelFile).where(ModelFile.model_id == model.id)
-            ).all())
+            return list(session.exec(select(ModelFile).where(ModelFile.model_id == model.id)).all())
         finally:
             self._close_session(session)
 
@@ -253,19 +235,14 @@ class ModelRepository:
         """Add a file to a model."""
         session = self._get_session()
         try:
-            model = session.exec(
-                select(Model).where(Model.code == code)
-            ).first()
+            model = session.exec(select(Model).where(Model.code == code)).first()
 
             if not model:
                 return None
 
             # Check if file already exists
             existing = session.exec(
-                select(ModelFile).where(
-                    ModelFile.model_id == model.id,
-                    ModelFile.filename == filename
-                )
+                select(ModelFile).where(ModelFile.model_id == model.id, ModelFile.filename == filename)
             ).first()
 
             if existing:
@@ -291,27 +268,17 @@ class ModelRepository:
         finally:
             self._close_session(session)
 
-    def mark_file_downloaded(
-        self,
-        code: str,
-        filename: str,
-        size_bytes: Optional[int] = None
-    ) -> bool:
+    def mark_file_downloaded(self, code: str, filename: str, size_bytes: Optional[int] = None) -> bool:
         """Mark a model file as downloaded."""
         session = self._get_session()
         try:
-            model = session.exec(
-                select(Model).where(Model.code == code)
-            ).first()
+            model = session.exec(select(Model).where(Model.code == code)).first()
 
             if not model:
                 return False
 
             model_file = session.exec(
-                select(ModelFile).where(
-                    ModelFile.model_id == model.id,
-                    ModelFile.filename == filename
-                )
+                select(ModelFile).where(ModelFile.model_id == model.id, ModelFile.filename == filename)
             ).first()
 
             if not model_file:
@@ -333,12 +300,8 @@ class ModelRepository:
         session = self._get_session()
         try:
             total = session.exec(select(func.count(Model.id))).one()
-            active = session.exec(
-                select(func.count(Model.id)).where(Model.is_active == True)
-            ).one()
-            builtin = session.exec(
-                select(func.count(Model.id)).where(Model.is_builtin == True)
-            ).one()
+            active = session.exec(select(func.count(Model.id)).where(Model.is_active == True)).one()
+            builtin = session.exec(select(func.count(Model.id)).where(Model.is_builtin == True)).one()
 
             return {
                 "total": total,

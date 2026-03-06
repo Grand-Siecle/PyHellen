@@ -37,6 +37,7 @@ class ModelMetrics:
         download_size_bytes: Total bytes downloaded
         error_count: Number of errors encountered
     """
+
     load_count: int = 0
     load_time_total_ms: float = 0.0
     last_loaded_at: Optional[datetime] = None
@@ -69,7 +70,7 @@ class ModelMetrics:
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
             "download_count": self.download_count,
             "download_size_mb": round(self.download_size_bytes / (1024 * 1024), 2),
-            "error_count": self.error_count
+            "error_count": self.error_count,
         }
 
 
@@ -81,6 +82,7 @@ class GlobalMetrics:
     Tracks overall application performance including uptime,
     total requests, errors, and per-model metrics.
     """
+
     started_at: datetime = field(default_factory=datetime.now)
     total_requests: int = 0
     total_errors: int = 0
@@ -104,7 +106,7 @@ class GlobalMetrics:
             "total_requests": self.total_requests,
             "total_errors": self.total_errors,
             "requests_per_minute": requests_per_minute,
-            "models": {name: m.to_dict() for name, m in self.models.items()}
+            "models": {name: m.to_dict() for name, m in self.models.items()},
         }
 
 
@@ -159,9 +161,10 @@ class ModelManager:
 
     def _get_metrics_repo(self):
         """Lazy initialization of metrics repository."""
-        if not hasattr(self, '_metrics_repo') or self._metrics_repo is None:
+        if not hasattr(self, "_metrics_repo") or self._metrics_repo is None:
             try:
                 from app.core.database import MetricsRepository
+
                 self._metrics_repo = MetricsRepository()
             except Exception as e:
                 logger.warning(f"Could not initialize metrics persistence: {e}")
@@ -177,7 +180,7 @@ class ModelManager:
         download_time_ms: Optional[float] = None,
         download_bytes: Optional[int] = None,
         error: bool = False,
-        increment_requests: bool = False
+        increment_requests: bool = False,
     ) -> None:
         """
         Thread-safe synchronous metrics update using a threading lock.
@@ -188,7 +191,7 @@ class ModelManager:
         if self._metrics is None:
             return
 
-        if not hasattr(self, '_metrics_thread_lock'):
+        if not hasattr(self, "_metrics_thread_lock"):
             self._metrics_thread_lock = threading.Lock()
 
         with self._metrics_thread_lock:
@@ -247,8 +250,7 @@ class ModelManager:
                 # Double-check after acquiring lock
                 if self._http_client is None or self._http_client.is_closed:
                     self._http_client = httpx.AsyncClient(
-                        timeout=httpx.Timeout(settings.download_timeout_seconds),
-                        follow_redirects=True
+                        timeout=httpx.Timeout(settings.download_timeout_seconds), follow_redirects=True
                     )
         return self._http_client
 
@@ -277,7 +279,7 @@ class ModelManager:
         """
         try:
             module_info = get_model(module)
-            if module_info and hasattr(module_info, 'DOWNLOADS'):
+            if module_info and hasattr(module_info, "DOWNLOADS"):
                 for file in module_info.DOWNLOADS:
                     file_path = os.path.join(model_path, file.name)
                     if not os.path.exists(file_path):
@@ -304,7 +306,7 @@ class ModelManager:
             models_status[model.code] = ModelStatusSchema(
                 language=model.name,
                 status=status,
-                files=self._get_model_files(model.code) if status in ["loaded", "not loaded"] else None
+                files=self._get_model_files(model.code) if status in ["loaded", "not loaded"] else None,
             )
         return models_status
 
@@ -314,18 +316,13 @@ class ModelManager:
         """
         try:
             module_info = get_model(model_name)
-            if module_info and hasattr(module_info, 'DOWNLOADS'):
+            if module_info and hasattr(module_info, "DOWNLOADS"):
                 return [file.name for file in module_info.DOWNLOADS]
             return None
         except Exception:
             return None
 
-    async def _download_file_async(
-        self,
-        url: str,
-        filename: str,
-        model_name: str
-    ) -> int:
+    async def _download_file_async(self, url: str, filename: str, model_name: str) -> int:
         """
         Asynchronously download a file with retry logic and cleanup on failure.
 
@@ -353,14 +350,14 @@ class ModelManager:
 
                 async with client.stream("GET", url) as response:
                     response.raise_for_status()
-                    total = int(response.headers.get('content-length', 0))
+                    total = int(response.headers.get("content-length", 0))
 
                     if total == 0:
                         raise RuntimeError(f"Failed to retrieve content length for {url}")
 
                     logger.info(f"Downloading {os.path.basename(filename)} ({total / (1024 * 1024):.2f} MB)...")
 
-                    with open(filename, 'wb') as f:
+                    with open(filename, "wb") as f:
                         downloaded = 0
                         last_progress = 0
                         async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
@@ -395,13 +392,12 @@ class ModelManager:
             except Exception as e:
                 last_error = e
                 logger.warning(
-                    f"⚠️ Error downloading {url}: {e} "
-                    f"(attempt {attempt + 1}/{settings.download_max_retries})"
+                    f"⚠️ Error downloading {url}: {e} (attempt {attempt + 1}/{settings.download_max_retries})"
                 )
 
             # Exponential backoff before retry
             if attempt < settings.download_max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(2**attempt)
 
         # Clean up partial file after all retries failed
         if os.path.exists(filename):
@@ -440,7 +436,7 @@ class ModelManager:
                 if module_info is None:
                     raise ValueError(f"Module '{module}' not found")
 
-                if not hasattr(module_info, 'DOWNLOADS') or not module_info.DOWNLOADS:
+                if not hasattr(module_info, "DOWNLOADS") or not module_info.DOWNLOADS:
                     raise ValueError(f"No files available for download in module '{module}'")
 
                 os.makedirs(get_path_models(module, ""), exist_ok=True)
@@ -461,11 +457,7 @@ class ModelManager:
                 download_time = (time.time() - start_time) * 1000
 
                 # Update metrics
-                self._update_metrics_sync(
-                    module,
-                    download_time_ms=download_time,
-                    download_bytes=total_bytes
-                )
+                self._update_metrics_sync(module, download_time_ms=download_time, download_bytes=total_bytes)
 
                 logger.info(f"✅ Download completed: {', '.join(downloaded_files)} ({download_time:.0f}ms)")
                 return True
@@ -496,7 +488,7 @@ class ModelManager:
         if module in self.taggers and self.taggers[module]:
             # Update last used timestamp (thread-safe)
             if self._metrics:
-                if not hasattr(self, '_metrics_thread_lock'):
+                if not hasattr(self, "_metrics_thread_lock"):
                     self._metrics_thread_lock = threading.Lock()
                 with self._metrics_thread_lock:
                     self._metrics.get_model_metrics(module).last_used_at = datetime.now()
@@ -530,12 +522,7 @@ class ModelManager:
 
             # Load the tagger using pie_extended
             logger.info(f"☕ Loading tagger for model '{module}'...")
-            tagger = get_tagger(
-                module,
-                batch_size=self.batch_size,
-                device=self.device,
-                model_path=None
-            )
+            tagger = get_tagger(module, batch_size=self.batch_size, device=self.device, model_path=None)
 
             if not tagger:
                 raise RuntimeError(f"Failed to load tagger for model '{module}'")
@@ -546,7 +533,7 @@ class ModelManager:
                 module_path = f"pie_extended.models.{module}.imports"
                 module_imports = importlib.import_module(module_path)
 
-                if hasattr(module_imports, 'get_iterator_and_processor'):
+                if hasattr(module_imports, "get_iterator_and_processor"):
                     self.iterator_processors[module] = module_imports.get_iterator_and_processor
                     logger.info(f"✅ Successfully loaded iterator and processor for '{module}'")
                 else:
@@ -612,11 +599,7 @@ class ModelManager:
 
             # Update metrics (thread-safe)
             process_time = (time.time() - start_time) * 1000
-            self._update_metrics_sync(
-                model_name,
-                process_time_ms=process_time,
-                increment_requests=True
-            )
+            self._update_metrics_sync(model_name, process_time_ms=process_time, increment_requests=True)
 
             return result
 
@@ -636,30 +619,19 @@ class ModelManager:
             result = self.process_text(model_name, tagger, text, lower)
             yield f"{result}\n"
 
-    async def process_text_async(
-        self,
-        model_name: str,
-        tagger,
-        text: str,
-        lower: bool = False
-    ) -> Dict[str, Any]:
+    async def process_text_async(self, model_name: str, tagger, text: str, lower: bool = False) -> Dict[str, Any]:
         """
         Process text asynchronously using thread pool to avoid blocking.
         """
         loop = asyncio.get_event_loop()
         async with self._processing_semaphore:
             result = await loop.run_in_executor(
-                self._executor,
-                functools.partial(self.process_text, model_name, tagger, text, lower)
+                self._executor, functools.partial(self.process_text, model_name, tagger, text, lower)
             )
             return result
 
     async def batch_process_concurrent(
-        self,
-        model_name: str,
-        texts: List[str],
-        lower: bool = False,
-        max_concurrent: int = 5
+        self, model_name: str, texts: List[str], lower: bool = False, max_concurrent: int = 5
     ) -> List[Dict[str, Any]]:
         """
         Process multiple texts concurrently for better performance.
@@ -700,10 +672,7 @@ class ModelManager:
                     await cache.set(model_name, text, lower, result)
                     return idx, result
 
-            tasks = [
-                process_with_semaphore(idx, text)
-                for idx, text in tasks_to_process
-            ]
+            tasks = [process_with_semaphore(idx, text) for idx, text in tasks_to_process]
 
             completed = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -716,12 +685,7 @@ class ModelManager:
 
         return results
 
-    async def stream_process_ndjson(
-        self,
-        model_name: str,
-        texts: List[str],
-        lower: bool = False
-    ) -> AsyncIterator[str]:
+    async def stream_process_ndjson(self, model_name: str, texts: List[str], lower: bool = False) -> AsyncIterator[str]:
         """
         Stream process texts and yield results as NDJSON (Newline Delimited JSON).
         Each line is a valid JSON object.
@@ -752,16 +716,11 @@ class ModelManager:
                 "text": text[:100] + "..." if len(text) > 100 else text,
                 "result": result,
                 "processing_time_ms": round(processing_time * 1000, 2),
-                "from_cache": from_cache
+                "from_cache": from_cache,
             }
             yield json.dumps(output) + "\n"
 
-    async def stream_process_sse(
-        self,
-        model_name: str,
-        texts: List[str],
-        lower: bool = False
-    ) -> AsyncIterator[str]:
+    async def stream_process_sse(self, model_name: str, texts: List[str], lower: bool = False) -> AsyncIterator[str]:
         """
         Stream process texts using Server-Sent Events (SSE) format.
         """
@@ -796,7 +755,7 @@ class ModelManager:
                 "progress": f"{idx + 1}/{total}",
                 "result": result,
                 "processing_time_ms": round(processing_time * 1000, 2),
-                "from_cache": from_cache
+                "from_cache": from_cache,
             }
             yield f"event: result\ndata: {json.dumps(data)}\n\n"
 
@@ -818,10 +777,10 @@ class ModelManager:
                 "device": self.device,
                 "batch_size": self.batch_size,
                 "files": [],
-                "total_size_mb": 0
+                "total_size_mb": 0,
             }
 
-            if hasattr(module_info, 'DOWNLOADS'):
+            if hasattr(module_info, "DOWNLOADS"):
                 for file in module_info.DOWNLOADS:
                     file_info = {"name": file.name, "url": file.url}
                     file_path = get_path_models(model_name, file.name)

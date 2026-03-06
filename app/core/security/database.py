@@ -74,11 +74,7 @@ class TokenDatabase:
         return hashlib.sha256(salted.encode()).hexdigest()
 
     def create_token(
-        self,
-        name: str,
-        scopes: List[TokenScope],
-        secret_key: str,
-        expires_days: Optional[int] = None
+        self, name: str, scopes: List[TokenScope], secret_key: str, expires_days: Optional[int] = None
     ) -> Tuple[Token, str]:
         """
         Create a new token.
@@ -103,13 +99,7 @@ class TokenDatabase:
                 INSERT INTO tokens (name, token_hash, scopes, created_at, expires_at, is_active)
                 VALUES (?, ?, ?, ?, ?, 1)
                 """,
-                (
-                    name,
-                    token_hash,
-                    scopes_json,
-                    now.isoformat(),
-                    expires_at.isoformat() if expires_at else None
-                )
+                (name, token_hash, scopes_json, now.isoformat(), expires_at.isoformat() if expires_at else None),
             )
             token_id = cursor.lastrowid
 
@@ -121,7 +111,7 @@ class TokenDatabase:
             created_at=now,
             expires_at=expires_at,
             last_used_at=None,
-            is_active=True
+            is_active=True,
         )
 
         logger.info(f"Created token '{name}' (id={token_id}) with scopes: {[s.value for s in scopes]}")
@@ -143,7 +133,7 @@ class TokenDatabase:
                 FROM tokens
                 WHERE token_hash = ? AND is_active = 1
                 """,
-                (token_hash,)
+                (token_hash,),
             ).fetchone()
 
             if not row:
@@ -159,10 +149,7 @@ class TokenDatabase:
 
             # Update last_used_at
             now = datetime.utcnow()
-            conn.execute(
-                "UPDATE tokens SET last_used_at = ? WHERE id = ?",
-                (now.isoformat(), row["id"])
-            )
+            conn.execute("UPDATE tokens SET last_used_at = ? WHERE id = ?", (now.isoformat(), row["id"]))
 
             scopes = [TokenScope(s) for s in json.loads(row["scopes"])]
 
@@ -174,7 +161,7 @@ class TokenDatabase:
                 created_at=datetime.fromisoformat(row["created_at"]),
                 expires_at=expires_at,
                 last_used_at=now,
-                is_active=bool(row["is_active"])
+                is_active=bool(row["is_active"]),
             )
 
     def list_tokens(self) -> List[Token]:
@@ -194,26 +181,25 @@ class TokenDatabase:
                 last_used = datetime.fromisoformat(row["last_used_at"]) if row["last_used_at"] else None
                 scopes = [TokenScope(s) for s in json.loads(row["scopes"])]
 
-                tokens.append(Token(
-                    id=row["id"],
-                    name=row["name"],
-                    token_hash=row["token_hash"][:16] + "...",
-                    scopes=scopes,
-                    created_at=datetime.fromisoformat(row["created_at"]),
-                    expires_at=expires_at,
-                    last_used_at=last_used,
-                    is_active=bool(row["is_active"])
-                ))
+                tokens.append(
+                    Token(
+                        id=row["id"],
+                        name=row["name"],
+                        token_hash=row["token_hash"][:16] + "...",
+                        scopes=scopes,
+                        created_at=datetime.fromisoformat(row["created_at"]),
+                        expires_at=expires_at,
+                        last_used_at=last_used,
+                        is_active=bool(row["is_active"]),
+                    )
+                )
 
             return tokens
 
     def revoke_token(self, token_id: int) -> bool:
         """Revoke a token by ID."""
         with self._get_connection() as conn:
-            cursor = conn.execute(
-                "UPDATE tokens SET is_active = 0 WHERE id = ?",
-                (token_id,)
-            )
+            cursor = conn.execute("UPDATE tokens SET is_active = 0 WHERE id = ?", (token_id,))
             if cursor.rowcount > 0:
                 logger.info(f"Revoked token id={token_id}")
                 return True
@@ -222,10 +208,7 @@ class TokenDatabase:
     def delete_token(self, token_id: int) -> bool:
         """Permanently delete a token."""
         with self._get_connection() as conn:
-            cursor = conn.execute(
-                "DELETE FROM tokens WHERE id = ?",
-                (token_id,)
-            )
+            cursor = conn.execute("DELETE FROM tokens WHERE id = ?", (token_id,))
             if cursor.rowcount > 0:
                 logger.info(f"Deleted token id={token_id}")
                 return True
@@ -235,10 +218,7 @@ class TokenDatabase:
         """Remove expired tokens. Returns count of removed tokens."""
         now = datetime.utcnow().isoformat()
         with self._get_connection() as conn:
-            cursor = conn.execute(
-                "DELETE FROM tokens WHERE expires_at IS NOT NULL AND expires_at < ?",
-                (now,)
-            )
+            cursor = conn.execute("DELETE FROM tokens WHERE expires_at IS NOT NULL AND expires_at < ?", (now,))
             count = cursor.rowcount
             if count > 0:
                 logger.info(f"Cleaned up {count} expired tokens")
@@ -251,12 +231,7 @@ class TokenDatabase:
             active = conn.execute("SELECT COUNT(*) FROM tokens WHERE is_active = 1").fetchone()[0]
             expired = conn.execute(
                 "SELECT COUNT(*) FROM tokens WHERE expires_at IS NOT NULL AND expires_at < ?",
-                (datetime.utcnow().isoformat(),)
+                (datetime.utcnow().isoformat(),),
             ).fetchone()[0]
 
-            return {
-                "total": total,
-                "active": active,
-                "inactive": total - active,
-                "expired": expired
-            }
+            return {"total": total, "active": active, "inactive": total - active, "expired": expired}

@@ -16,8 +16,11 @@ from app.schemas.services import (
     HealthCheckResponse,
     LivenessResponse,
     ReadinessResponse,
-    StatusResponse, StatusSchema,
-    CPUStatusSchema, GPUStatusSchema, ModelStatusSchema
+    StatusResponse,
+    StatusSchema,
+    CPUStatusSchema,
+    GPUStatusSchema,
+    ModelStatusSchema,
 )
 from app.core.utils import check_gpu_availability, get_device, get_n_workers
 from app.core.settings import Settings
@@ -31,6 +34,7 @@ router = APIRouter()
 # Kubernetes Probes
 # ===========================================
 
+
 @router.get("/live", response_model=LivenessResponse)
 async def liveness_probe():
     """
@@ -41,10 +45,7 @@ async def liveness_probe():
 
     Returns 200 if alive, container will be restarted if this fails.
     """
-    return LivenessResponse(
-        status="alive",
-        timestamp=datetime.now()
-    )
+    return LivenessResponse(status="alive", timestamp=datetime.now())
 
 
 @router.get("/ready", response_model=ReadinessResponse)
@@ -62,7 +63,7 @@ async def readiness_probe(request: Request):
 
     # Check 1: Model manager is initialized
     try:
-        model_manager = getattr(request.app.state, 'model_manager', None)
+        model_manager = getattr(request.app.state, "model_manager", None)
         checks["model_manager"] = model_manager is not None
     except Exception as e:
         checks["model_manager"] = False
@@ -82,7 +83,7 @@ async def readiness_probe(request: Request):
     try:
         settings = Settings()
         if settings.auth_enabled:
-            auth_manager = getattr(request.app.state, 'auth_manager', None)
+            auth_manager = getattr(request.app.state, "auth_manager", None)
             checks["auth_manager"] = auth_manager is not None
         else:
             checks["auth_manager"] = True  # Not required when auth disabled
@@ -97,15 +98,11 @@ async def readiness_probe(request: Request):
         status="ready" if is_ready else "not_ready",
         timestamp=datetime.now(),
         checks=checks,
-        details=details if details else None
+        details=details if details else None,
     )
 
     if not is_ready:
-        return Response(
-            content=response.model_dump_json(),
-            media_type="application/json",
-            status_code=503
-        )
+        return Response(content=response.model_dump_json(), media_type="application/json", status_code=503)
 
     return response
 
@@ -126,13 +123,14 @@ async def health_check():
         version=settings.version,
         status="healthy",
         timestamp=datetime.now(),
-        details={"gpu_available": check_gpu_availability()[0]}
+        details={"gpu_available": check_gpu_availability()[0]},
     )
 
 
 # ===========================================
 # Prometheus Metrics
 # ===========================================
+
 
 @router.get("/metrics")
 async def prometheus_metrics(request: Request):
@@ -159,7 +157,7 @@ async def prometheus_metrics(request: Request):
         "pyhellen_info",
         1,
         "PyHellen service information",
-        labels={"version": settings.version, "service": settings.title_app}
+        labels={"version": settings.version, "service": settings.title_app},
     )
 
     # GPU availability
@@ -168,25 +166,22 @@ async def prometheus_metrics(request: Request):
 
     # Loaded models count
     try:
-        model_manager = getattr(request.app.state, 'model_manager', None)
+        model_manager = getattr(request.app.state, "model_manager", None)
         if model_manager:
             loaded_count = len(model_manager.taggers)
             add_metric("pyhellen_models_loaded", loaded_count, "Number of models currently loaded")
 
             # Model manager metrics
-            if hasattr(model_manager, '_metrics') and model_manager._metrics:
+            if hasattr(model_manager, "_metrics") and model_manager._metrics:
                 metrics = model_manager._metrics
                 add_metric(
                     "pyhellen_requests_total",
                     metrics.total_requests,
                     "Total number of requests processed",
-                    metric_type="counter"
+                    metric_type="counter",
                 )
                 add_metric(
-                    "pyhellen_errors_total",
-                    metrics.total_errors,
-                    "Total number of errors",
-                    metric_type="counter"
+                    "pyhellen_errors_total", metrics.total_errors, "Total number of errors", metric_type="counter"
                 )
     except Exception:
         pass
@@ -202,6 +197,7 @@ async def prometheus_metrics(request: Request):
     # Request logging stats
     try:
         from app.core.database import RequestLogRepository
+
         request_repo = RequestLogRepository()
         stats = request_repo.get_statistics()
         if stats:
@@ -209,7 +205,7 @@ async def prometheus_metrics(request: Request):
                 "pyhellen_requests_logged_total",
                 stats.get("total_requests", 0),
                 "Total logged requests",
-                metric_type="counter"
+                metric_type="counter",
             )
     except Exception:
         pass
@@ -217,15 +213,13 @@ async def prometheus_metrics(request: Request):
     # CPU workers
     add_metric("pyhellen_cpu_workers", get_n_workers(), "Number of CPU workers available")
 
-    return Response(
-        content="\n".join(metrics_lines) + "\n",
-        media_type="text/plain; charset=utf-8"
-    )
+    return Response(content="\n".join(metrics_lines) + "\n", media_type="text/plain; charset=utf-8")
 
 
 # ===========================================
 # Detailed Status
 # ===========================================
+
 
 @router.get("/api/status", response_model=StatusResponse)
 async def status_models(request: Request):
@@ -240,11 +234,7 @@ async def status_models(request: Request):
     # Check GPU status
     gpu_available, gpu_info = check_gpu_availability()
     if gpu_available:
-        status["gpu"] = GPUStatusSchema(
-            available=True,
-            device=gpu_info,
-            in_use=(device == "cuda")
-        )
+        status["gpu"] = GPUStatusSchema(available=True, device=gpu_info, in_use=(device == "cuda"))
     else:
         status["cpu"] = CPUStatusSchema(workers=get_n_workers())
 
@@ -255,8 +245,7 @@ async def status_models(request: Request):
     models = {}
     for model in db_models:
         models[model.code] = ModelStatusSchema(
-            language=model.name,
-            status=request.app.state.taggers_ml.get(model.code, "not loaded")
+            language=model.name, status=request.app.state.taggers_ml.get(model.code, "not loaded")
         )
 
     status["models"] = models

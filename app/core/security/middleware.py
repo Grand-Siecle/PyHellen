@@ -54,9 +54,9 @@ def setup_exception_handlers(app: FastAPI) -> None:
             status_code=exc.status_code,
             content={
                 "error": exc.detail if exc.status_code < 500 else "Internal server error",
-                "status_code": exc.status_code
+                "status_code": exc.status_code,
             },
-            headers=exc.headers
+            headers=exc.headers,
         )
 
     @app.exception_handler(Exception)
@@ -68,19 +68,12 @@ def setup_exception_handlers(app: FastAPI) -> None:
         """
         # Log full error details server-side
         logger.error(
-            f"Unhandled exception on {request.method} {request.url.path}: "
-            f"{type(exc).__name__}: {str(exc)}",
-            exc_info=True
+            f"Unhandled exception on {request.method} {request.url.path}: {type(exc).__name__}: {str(exc)}",
+            exc_info=True,
         )
 
         # Return generic error to client
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": "An internal error occurred",
-                "status_code": 500
-            }
-        )
+        return JSONResponse(status_code=500, content={"error": "An internal error occurred", "status_code": 500})
 
 
 def validate_model_name(model: str, allowed_models: List[str]) -> str:
@@ -102,8 +95,7 @@ def validate_model_name(model: str, allowed_models: List[str]) -> str:
 
     if model_clean not in allowed_models:
         raise HTTPException(
-            status_code=400,
-            detail=f"Invalid model '{model}'. Allowed models: {', '.join(allowed_models)}"
+            status_code=400, detail=f"Invalid model '{model}'. Allowed models: {', '.join(allowed_models)}"
         )
 
     return model_clean
@@ -112,5 +104,6 @@ def validate_model_name(model: str, allowed_models: List[str]) -> str:
 def get_allowed_models() -> List[str]:
     """Get list of allowed model names from database."""
     from app.core.database import ModelRepository
+
     model_repo = ModelRepository()
     return model_repo.get_active_codes()

@@ -16,6 +16,7 @@ from app.core.logger import logger
 @dataclass
 class CacheEntry:
     """A single cache entry with value and expiration time."""
+
     value: Any
     expires_at: float
     model: str
@@ -33,9 +34,7 @@ class HybridCache:
     - TTL support with lazy expiration
     """
 
-    def __init__(
-        self, max_size: int = 1000, ttl_seconds: int = 3600, persist: bool = True
-    ):
+    def __init__(self, max_size: int = 1000, ttl_seconds: int = 3600, persist: bool = True):
         """
         Initialize the hybrid cache.
 
@@ -59,9 +58,10 @@ class HybridCache:
         if self._db_repo is None and self._persist:
             try:
                 from app.core.database import CacheRepository
+
                 self._db_repo = CacheRepository(
                     max_size=self._max_size * 2,  # DB can hold more
-                    ttl_seconds=self._ttl_seconds
+                    ttl_seconds=self._ttl_seconds,
                 )
             except Exception as e:
                 logger.warning(f"Could not initialize cache persistence: {e}")
@@ -126,9 +126,7 @@ class HybridCache:
                     expires_at = time.time() + self._ttl_seconds
                     if len(self._cache) >= self._max_size:
                         self._cache.popitem(last=False)
-                    self._cache[key] = CacheEntry(
-                        value=value, expires_at=expires_at, model=model, hits=1
-                    )
+                    self._cache[key] = CacheEntry(value=value, expires_at=expires_at, model=model, hits=1)
                     self._hits += 1
                 return value
 
@@ -150,9 +148,7 @@ class HybridCache:
             if len(self._cache) >= self._max_size and key not in self._cache:
                 self._cache.popitem(last=False)
 
-            self._cache[key] = CacheEntry(
-                value=value, expires_at=expires_at, model=model
-            )
+            self._cache[key] = CacheEntry(value=value, expires_at=expires_at, model=model)
             self._cache.move_to_end(key)
 
         # Persist to database (fire and forget)
@@ -187,10 +183,7 @@ class HybridCache:
         # Clean in-memory
         async with self._lock:
             now = time.time()
-            expired_keys = [
-                key for key, entry in self._cache.items()
-                if now > entry.expires_at
-            ]
+            expired_keys = [key for key, entry in self._cache.items() if now > entry.expires_at]
             for key in expired_keys:
                 del self._cache[key]
             count = len(expired_keys)
@@ -216,10 +209,7 @@ class HybridCache:
 
         # Clear from in-memory using the model field in CacheEntry
         async with self._lock:
-            keys_to_remove = [
-                key for key, entry in self._cache.items()
-                if entry.model == model
-            ]
+            keys_to_remove = [key for key, entry in self._cache.items() if entry.model == model]
             for key in keys_to_remove:
                 del self._cache[key]
             memory_count = len(keys_to_remove)
@@ -236,8 +226,7 @@ class HybridCache:
         total_count = memory_count + db_count
         if total_count > 0:
             logger.info(
-                f"Cleared {total_count} cache entries for model '{model}' "
-                f"(memory: {memory_count}, db: {db_count})"
+                f"Cleared {total_count} cache entries for model '{model}' (memory: {memory_count}, db: {db_count})"
             )
 
         return total_count
@@ -255,7 +244,7 @@ class HybridCache:
             "hits": self._hits,
             "misses": self._misses,
             "hit_rate_percent": round(hit_rate, 2),
-            "persistence_enabled": self._persist
+            "persistence_enabled": self._persist,
         }
 
         # Add database stats if available

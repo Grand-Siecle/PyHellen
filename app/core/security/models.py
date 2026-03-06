@@ -8,28 +8,23 @@ from pydantic import BaseModel, Field
 
 class TokenScope(str, Enum):
     """Available token permission scopes."""
-    READ = "read"           # Can use tagging endpoints
-    WRITE = "write"         # Can modify cache
-    ADMIN = "admin"         # Full access including token management
+
+    READ = "read"  # Can use tagging endpoints
+    WRITE = "write"  # Can modify cache
+    ADMIN = "admin"  # Full access including token management
 
 
 class TokenCreate(BaseModel):
     """Request model for creating a new token."""
+
     name: str = Field(..., min_length=1, max_length=100, description="Token name/description")
-    scopes: List[TokenScope] = Field(
-        default=[TokenScope.READ],
-        description="Permission scopes for this token"
-    )
-    expires_days: Optional[int] = Field(
-        None,
-        ge=1,
-        le=365,
-        description="Days until token expires (None = never)"
-    )
+    scopes: List[TokenScope] = Field(default=[TokenScope.READ], description="Permission scopes for this token")
+    expires_days: Optional[int] = Field(None, ge=1, le=365, description="Days until token expires (None = never)")
 
 
 class Token(BaseModel):
     """Token model returned from database."""
+
     id: int
     name: str
     token_hash: str
@@ -45,6 +40,7 @@ class Token(BaseModel):
 
 class TokenResponse(BaseModel):
     """Response when a new token is created (includes plain token once)."""
+
     id: int
     name: str
     token: str = Field(..., description="Plain token - save this, it won't be shown again!")
@@ -55,6 +51,7 @@ class TokenResponse(BaseModel):
 
 class TokenInfo(BaseModel):
     """Token info without sensitive data."""
+
     id: int
     name: str
     scopes: List[TokenScope]
@@ -66,6 +63,7 @@ class TokenInfo(BaseModel):
 
 class AuthStatus(BaseModel):
     """Authentication status response."""
+
     authenticated: bool
     auth_enabled: bool
     token_name: Optional[str] = None

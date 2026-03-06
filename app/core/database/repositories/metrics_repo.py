@@ -20,16 +20,12 @@ class MetricsRepository(BaseRepository):
 
     def _get_or_create_metrics(self, session: Session, model_code: str) -> Optional[ModelMetrics]:
         """Get or create metrics for a model."""
-        model = session.exec(
-            select(Model).where(Model.code == model_code)
-        ).first()
+        model = session.exec(select(Model).where(Model.code == model_code)).first()
 
         if not model:
             return None
 
-        metrics = session.exec(
-            select(ModelMetrics).where(ModelMetrics.model_id == model.id)
-        ).first()
+        metrics = session.exec(select(ModelMetrics).where(ModelMetrics.model_id == model.id)).first()
 
         if not metrics:
             metrics = ModelMetrics(model_id=model.id)
@@ -51,16 +47,12 @@ class MetricsRepository(BaseRepository):
         """Get metrics for a specific model."""
         session = self._get_session()
         try:
-            model = session.exec(
-                select(Model).where(Model.code == model_code)
-            ).first()
+            model = session.exec(select(Model).where(Model.code == model_code)).first()
 
             if not model:
                 return None
 
-            return session.exec(
-                select(ModelMetrics).where(ModelMetrics.model_id == model.id)
-            ).first()
+            return session.exec(select(ModelMetrics).where(ModelMetrics.model_id == model.id)).first()
         finally:
             self._close_session(session)
 
@@ -69,9 +61,7 @@ class MetricsRepository(BaseRepository):
         session = self._get_session()
         try:
             # Join metrics with models to get codes
-            results = session.exec(
-                select(ModelMetrics, Model.code).join(Model)
-            ).all()
+            results = session.exec(select(ModelMetrics, Model.code).join(Model)).all()
 
             return {code: metrics for metrics, code in results}
         finally:
@@ -116,12 +106,7 @@ class MetricsRepository(BaseRepository):
         finally:
             self._close_session(session)
 
-    def update_download_metrics(
-        self,
-        model_code: str,
-        download_time_ms: float,
-        download_bytes: int
-    ) -> bool:
+    def update_download_metrics(self, model_code: str, download_time_ms: float, download_bytes: int) -> bool:
         """Update metrics after downloading model files."""
         session = self._get_session()
         try:
@@ -208,16 +193,12 @@ class MetricsRepository(BaseRepository):
         """Reset metrics for a specific model."""
         session = self._get_session()
         try:
-            model = session.exec(
-                select(Model).where(Model.code == model_code)
-            ).first()
+            model = session.exec(select(Model).where(Model.code == model_code)).first()
 
             if not model:
                 return False
 
-            metrics = session.exec(
-                select(ModelMetrics).where(ModelMetrics.model_id == model.id)
-            ).first()
+            metrics = session.exec(select(ModelMetrics).where(ModelMetrics.model_id == model.id)).first()
 
             if metrics:
                 session.delete(metrics)

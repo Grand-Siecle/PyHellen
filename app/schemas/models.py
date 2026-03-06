@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, computed_field
 
 class ModelBase(BaseModel):
     """Base model schema."""
+
     code: str = Field(..., description="Unique model code (e.g., 'lasla', 'grc')")
     name: str = Field(..., description="Human-readable model name")
     description: Optional[str] = Field(None, description="Model description")
@@ -14,6 +15,7 @@ class ModelBase(BaseModel):
 
 class ModelCreate(ModelBase):
     """Schema for creating a new model."""
+
     pie_module: str = Field(..., description="Pie Extended module name")
     batch_size: Optional[int] = Field(None, ge=1, description="Override batch size for this model")
     priority: int = Field(100, ge=0, description="Display priority (lower = first)")
@@ -21,6 +23,7 @@ class ModelCreate(ModelBase):
 
 class ModelUpdate(BaseModel):
     """Schema for updating a model."""
+
     name: Optional[str] = Field(None, description="Human-readable model name")
     description: Optional[str] = Field(None, description="Model description")
     pie_module: Optional[str] = Field(None, description="Pie Extended module name")
@@ -30,6 +33,7 @@ class ModelUpdate(BaseModel):
 
 class ModelInfo(ModelBase):
     """Schema for model information response."""
+
     id: int
     pie_module: str
     is_active: bool
@@ -44,6 +48,7 @@ class ModelInfo(ModelBase):
 
 class ModelFileInfo(BaseModel):
     """Schema for model file information."""
+
     id: int
     filename: str
     url: str
@@ -65,6 +70,7 @@ class ModelFileInfo(BaseModel):
 
 class ModelDetailInfo(ModelInfo):
     """Schema for detailed model information including files and metrics."""
+
     files: List[ModelFileInfo] = Field(default_factory=list)
     total_size_mb: float = Field(0, description="Total size of downloaded files")
     status: str = Field("not loaded", description="Current model status")
@@ -75,6 +81,7 @@ class ModelDetailInfo(ModelInfo):
 
 class ModelListResponse(BaseModel):
     """Schema for listing models."""
+
     models: List[ModelInfo]
     total: int
     active: int
@@ -82,6 +89,7 @@ class ModelListResponse(BaseModel):
 
 class ModelStatistics(BaseModel):
     """Schema for model statistics."""
+
     total: int
     active: int
     inactive: int
@@ -91,6 +99,7 @@ class ModelStatistics(BaseModel):
 
 class ModelFileCreate(BaseModel):
     """Schema for adding a model file."""
+
     filename: str = Field(..., description="File name")
     url: str = Field(..., description="Download URL")
     size_bytes: Optional[int] = Field(None, description="Expected file size")
