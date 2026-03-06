@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import List, Optional, Tuple
 
-from sqlmodel import Session, select, func
+from sqlmodel import select, func
 
 from app.core.database.models import Token
 from app.core.database.repositories.base import BaseRepository

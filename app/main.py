@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Using PIE_EXTENDED_DOWNLOADS: {PIE_EXTENDED_DOWNLOADS}")
 
     # Initialize database (creates tables and default models if needed)
-    db_engine = get_db_manager()  # get_db_manager is aliased to get_db_engine
+    get_db_manager()  # Initialize database engine
     model_repo = ModelRepository()
     active_models = model_repo.get_active_codes()
     logger.info(f"Database initialized. Active models: {active_models}")
@@ -93,7 +93,8 @@ async def lifespan(app: FastAPI):
             await model_manager._http_client.aclose()
         # Log final metrics
         if model_manager._metrics:
-            logger.info(f"Final metrics: {model_manager._metrics.total_requests} requests, {model_manager._metrics.total_errors} errors")
+            metrics = model_manager._metrics
+            logger.info(f"Final metrics: {metrics.total_requests} requests, {metrics.total_errors} errors")
 
 
 def create_application() -> FastAPI:

@@ -97,7 +97,8 @@ class DatabaseManager:
                 for sql in sql_statements:
                     conn.execute(sql)
                 conn.execute(
-                    "INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, datetime('now'), ?)",
+                    "INSERT INTO schema_migrations (version, applied_at, description) "
+                    "VALUES (?, datetime('now'), ?)",
                     (version, description)
                 )
 
@@ -157,7 +158,8 @@ class DatabaseManager:
                     UNIQUE(model_id, filename)
                 )
                 """,
-                "CREATE INDEX IF NOT EXISTS idx_model_files_model ON model_files(model_id)",
+                "CREATE INDEX IF NOT EXISTS idx_model_files_model "
+                "ON model_files(model_id)",
 
                 # Model metrics
                 """
@@ -198,7 +200,8 @@ class DatabaseManager:
                 """,
                 "CREATE INDEX IF NOT EXISTS idx_cache_key ON cache_entries(cache_key)",
                 "CREATE INDEX IF NOT EXISTS idx_cache_model ON cache_entries(model_id)",
-                "CREATE INDEX IF NOT EXISTS idx_cache_expires ON cache_entries(expires_at)",
+                "CREATE INDEX IF NOT EXISTS idx_cache_expires "
+                "ON cache_entries(expires_at)",
 
                 # Request log
                 """
@@ -220,7 +223,8 @@ class DatabaseManager:
                     FOREIGN KEY (token_id) REFERENCES tokens(id) ON DELETE SET NULL
                 )
                 """,
-                "CREATE INDEX IF NOT EXISTS idx_request_timestamp ON request_log(timestamp)",
+                "CREATE INDEX IF NOT EXISTS idx_request_timestamp "
+                "ON request_log(timestamp)",
                 "CREATE INDEX IF NOT EXISTS idx_request_model ON request_log(model_id)",
 
                 # Audit log
@@ -235,10 +239,12 @@ class DatabaseManager:
                     details_json TEXT,
                     client_ip TEXT,
                     success INTEGER DEFAULT 1,
-                    FOREIGN KEY (actor_token_id) REFERENCES tokens(id) ON DELETE SET NULL
+                    FOREIGN KEY (actor_token_id) REFERENCES tokens(id)
+                        ON DELETE SET NULL
                 )
                 """,
-                "CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)",
+                "CREATE INDEX IF NOT EXISTS idx_audit_timestamp "
+                "ON audit_log(timestamp)",
                 "CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action)",
 
                 # App state (key-value store)
@@ -252,15 +258,31 @@ class DatabaseManager:
 
                 # Insert default models (builtin)
                 """
-                INSERT OR IGNORE INTO models (code, name, description, pie_module, is_active, is_builtin, priority, created_at, updated_at)
+                INSERT OR IGNORE INTO models
+                    (code, name, description, pie_module,
+                     is_active, is_builtin, priority, created_at, updated_at)
                 VALUES
-                    ('lasla', 'Classical Latin', 'Tagger for Classical Latin texts', 'lasla', 1, 1, 1, datetime('now'), datetime('now')),
-                    ('grc', 'Ancient Greek', 'Tagger for Ancient Greek texts', 'grc', 1, 1, 2, datetime('now'), datetime('now')),
-                    ('fro', 'Old French', 'Tagger for Old French texts', 'fro', 1, 1, 3, datetime('now'), datetime('now')),
-                    ('freem', 'Early Modern French', 'Tagger for Early Modern French texts', 'freem', 1, 1, 4, datetime('now'), datetime('now')),
-                    ('fr', 'Classical French', 'Tagger for Classical French texts', 'fr', 1, 1, 5, datetime('now'), datetime('now')),
-                    ('dum', 'Old Dutch', 'Tagger for Old Dutch texts', 'dum', 1, 1, 6, datetime('now'), datetime('now')),
-                    ('occ_cont', 'Occitan Contemporain', 'Tagger for Contemporary Occitan texts', 'occ_cont', 1, 1, 7, datetime('now'), datetime('now'))
+                    ('lasla', 'Classical Latin',
+                     'Tagger for Classical Latin texts', 'lasla',
+                     1, 1, 1, datetime('now'), datetime('now')),
+                    ('grc', 'Ancient Greek',
+                     'Tagger for Ancient Greek texts', 'grc',
+                     1, 1, 2, datetime('now'), datetime('now')),
+                    ('fro', 'Old French',
+                     'Tagger for Old French texts', 'fro',
+                     1, 1, 3, datetime('now'), datetime('now')),
+                    ('freem', 'Early Modern French',
+                     'Tagger for Early Modern French texts', 'freem',
+                     1, 1, 4, datetime('now'), datetime('now')),
+                    ('fr', 'Classical French',
+                     'Tagger for Classical French texts', 'fr',
+                     1, 1, 5, datetime('now'), datetime('now')),
+                    ('dum', 'Old Dutch',
+                     'Tagger for Old Dutch texts', 'dum',
+                     1, 1, 6, datetime('now'), datetime('now')),
+                    ('occ_cont', 'Occitan Contemporain',
+                     'Tagger for Contemporary Occitan texts', 'occ_cont',
+                     1, 1, 7, datetime('now'), datetime('now'))
                 """,
             ])
         }

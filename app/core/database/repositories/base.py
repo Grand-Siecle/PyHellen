@@ -1,11 +1,8 @@
 """Base repository class with SQLModel session management."""
 
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
 from sqlmodel import Session
-
-if TYPE_CHECKING:
-    from app.core.database.engine import DatabaseEngine
 
 
 class BaseRepository:

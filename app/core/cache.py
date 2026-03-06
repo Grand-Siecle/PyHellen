@@ -33,7 +33,9 @@ class HybridCache:
     - TTL support with lazy expiration
     """
 
-    def __init__(self, max_size: int = 1000, ttl_seconds: int = 3600, persist: bool = True):
+    def __init__(
+        self, max_size: int = 1000, ttl_seconds: int = 3600, persist: bool = True
+    ):
         """
         Initialize the hybrid cache.
 
@@ -124,7 +126,9 @@ class HybridCache:
                     expires_at = time.time() + self._ttl_seconds
                     if len(self._cache) >= self._max_size:
                         self._cache.popitem(last=False)
-                    self._cache[key] = CacheEntry(value=value, expires_at=expires_at, model=model, hits=1)
+                    self._cache[key] = CacheEntry(
+                        value=value, expires_at=expires_at, model=model, hits=1
+                    )
                     self._hits += 1
                 return value
 
@@ -146,7 +150,9 @@ class HybridCache:
             if len(self._cache) >= self._max_size and key not in self._cache:
                 self._cache.popitem(last=False)
 
-            self._cache[key] = CacheEntry(value=value, expires_at=expires_at, model=model)
+            self._cache[key] = CacheEntry(
+                value=value, expires_at=expires_at, model=model
+            )
             self._cache.move_to_end(key)
 
         # Persist to database (fire and forget)
@@ -229,7 +235,10 @@ class HybridCache:
 
         total_count = memory_count + db_count
         if total_count > 0:
-            logger.info(f"Cleared {total_count} cache entries for model '{model}' (memory: {memory_count}, db: {db_count})")
+            logger.info(
+                f"Cleared {total_count} cache entries for model '{model}' "
+                f"(memory: {memory_count}, db: {db_count})"
+            )
 
         return total_count
 

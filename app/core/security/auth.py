@@ -1,6 +1,5 @@
 """Authentication manager and FastAPI dependencies."""
 
-import secrets
 from typing import Optional, List
 from fastapi import Depends, HTTPException, Header, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials

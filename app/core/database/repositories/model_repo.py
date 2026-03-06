@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from sqlmodel import Session, select, func
 
-from app.core.database.models import Model, ModelFile, ModelCreate, ModelUpdate
+from app.core.database.models import Model, ModelFile
 from app.core.database.engine import get_db_engine
 from app.core.logger import logger
 

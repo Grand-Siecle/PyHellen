@@ -6,14 +6,13 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from app.schemas.nlp import SupportedLanguages, PieLanguage
 from app.core.model_manager import model_manager
 from app.core.cache import cache
 from app.core.logger import logger
 from app.core.security import require_auth, require_admin, Token, TokenScope
 from app.core.security.auth import require_scope
 from app.core.security.middleware import validate_model_name, get_allowed_models
-from app.core.database import get_db_manager, ModelRepository
+from app.core.database import ModelRepository
 
 router = APIRouter()
 

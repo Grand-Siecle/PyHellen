@@ -1,10 +1,9 @@
 """Security middleware for headers and error handling."""
 
-from typing import List, Optional, Callable
+from typing import List, Callable
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.types import ASGIApp
 
 from app.core.logger import logger
 

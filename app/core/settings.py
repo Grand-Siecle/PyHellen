@@ -1,6 +1,5 @@
-import secrets
 import semver
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator
 

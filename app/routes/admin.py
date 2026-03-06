@@ -12,10 +12,9 @@ from app.core.security import (
     require_admin,
     Token,
     TokenCreate,
-    TokenScope,
 )
 from app.core.security.models import TokenResponse, TokenInfo, AuthStatus
-from app.core.database import get_db_manager, ModelRepository, AuditRepository, RequestLogRepository, MetricsRepository
+from app.core.database import ModelRepository, AuditRepository, RequestLogRepository, MetricsRepository
 from app.core.database.repositories.audit_repo import AuditAction
 from app.core.logger import logger
 from app.schemas.models import (

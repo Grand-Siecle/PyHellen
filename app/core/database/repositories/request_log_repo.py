@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from sqlmodel import Session, select, func, col
+from sqlmodel import select, func, col
 
 from app.core.database.models import Model, RequestLog
 from app.core.database.repositories.base import BaseRepository

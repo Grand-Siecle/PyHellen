@@ -71,7 +71,7 @@ class DatabaseEngine:
 
     def _init_database(self):
         """Create all tables and apply migrations."""
-        from app.core.database.models import (
+        from app.core.database.models import (  # noqa: F401
             Model, ModelFile, ModelMetrics, CacheEntry,
             Token, RequestLog, AuditLog, AppState, SchemaMigration
         )
@@ -87,13 +87,20 @@ class DatabaseEngine:
         from app.core.database.models import Model
 
         default_models = [
-            {"code": "lasla", "name": "Classical Latin", "description": "Tagger for Classical Latin texts", "pie_module": "lasla", "priority": 1},
-            {"code": "grc", "name": "Ancient Greek", "description": "Tagger for Ancient Greek texts", "pie_module": "grc", "priority": 2},
-            {"code": "fro", "name": "Old French", "description": "Tagger for Old French texts", "pie_module": "fro", "priority": 3},
-            {"code": "freem", "name": "Early Modern French", "description": "Tagger for Early Modern French texts", "pie_module": "freem", "priority": 4},
-            {"code": "fr", "name": "Classical French", "description": "Tagger for Classical French texts", "pie_module": "fr", "priority": 5},
-            {"code": "dum", "name": "Old Dutch", "description": "Tagger for Old Dutch texts", "pie_module": "dum", "priority": 6},
-            {"code": "occ_cont", "name": "Occitan Contemporain", "description": "Tagger for Contemporary Occitan texts", "pie_module": "occ_cont", "priority": 7},
+            {"code": "lasla", "name": "Classical Latin",
+             "description": "Tagger for Classical Latin texts", "pie_module": "lasla", "priority": 1},
+            {"code": "grc", "name": "Ancient Greek",
+             "description": "Tagger for Ancient Greek texts", "pie_module": "grc", "priority": 2},
+            {"code": "fro", "name": "Old French",
+             "description": "Tagger for Old French texts", "pie_module": "fro", "priority": 3},
+            {"code": "freem", "name": "Early Modern French",
+             "description": "Tagger for Early Modern French texts", "pie_module": "freem", "priority": 4},
+            {"code": "fr", "name": "Classical French",
+             "description": "Tagger for Classical French texts", "pie_module": "fr", "priority": 5},
+            {"code": "dum", "name": "Old Dutch",
+             "description": "Tagger for Old Dutch texts", "pie_module": "dum", "priority": 6},
+            {"code": "occ_cont", "name": "Occitan Contemporain",
+             "description": "Tagger for Contemporary Occitan texts", "pie_module": "occ_cont", "priority": 7},
         ]
 
         with self.get_session() as session:

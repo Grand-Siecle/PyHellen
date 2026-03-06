@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 # Legacy logging constants (deprecated - use LOG_LEVEL and LOG_FORMAT env vars)
 # Kept for backwards compatibility

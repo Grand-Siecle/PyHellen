@@ -1,4 +1,4 @@
-from typing import Dict, Optional, List, Union, Callable, Tuple, AsyncIterator, Any
+from typing import Dict, Optional, List, Callable, Tuple, AsyncIterator, Any
 from dataclasses import dataclass, field
 from datetime import datetime
 import asyncio
@@ -293,7 +293,7 @@ class ModelManager:
         """
         Get status information for all supported models from the database.
         """
-        from app.core.database import get_db_manager, ModelRepository
+        from app.core.database import ModelRepository
 
         model_repo = ModelRepository()
         models = model_repo.get_all(include_inactive=False)
@@ -383,7 +383,10 @@ class ModelManager:
                 logger.warning(f"⚠️ Timeout downloading {url} (attempt {attempt + 1}/{settings.download_max_retries})")
             except httpx.HTTPStatusError as e:
                 last_error = e
-                logger.warning(f"⚠️ HTTP error {e.response.status_code} for {url} (attempt {attempt + 1}/{settings.download_max_retries})")
+                logger.warning(
+                    f"⚠️ HTTP error {e.response.status_code} for {url} "
+                    f"(attempt {attempt + 1}/{settings.download_max_retries})"
+                )
             except asyncio.CancelledError:
                 # Clean up partial file on cancellation
                 if os.path.exists(filename):
@@ -391,7 +394,10 @@ class ModelManager:
                 raise
             except Exception as e:
                 last_error = e
-                logger.warning(f"⚠️ Error downloading {url}: {e} (attempt {attempt + 1}/{settings.download_max_retries})")
+                logger.warning(
+                    f"⚠️ Error downloading {url}: {e} "
+                    f"(attempt {attempt + 1}/{settings.download_max_retries})"
+                )
 
             # Exponential backoff before retry
             if attempt < settings.download_max_retries - 1:
@@ -614,7 +620,7 @@ class ModelManager:
 
             return result
 
-        except Exception as e:
+        except Exception:
             self._update_metrics_sync(model_name, error=True)
             raise
 

@@ -1,7 +1,7 @@
 """Repository for model metrics using SQLModel."""
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from sqlmodel import Session, select, func
 
