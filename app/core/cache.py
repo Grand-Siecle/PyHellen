@@ -56,9 +56,8 @@ class HybridCache:
         """Lazy initialization of database repository."""
         if self._db_repo is None and self._persist:
             try:
-                from app.core.database import get_db_manager, CacheRepository
+                from app.core.database import CacheRepository
                 self._db_repo = CacheRepository(
-                    get_db_manager(),
                     max_size=self._max_size * 2,  # DB can hold more
                     ttl_seconds=self._ttl_seconds
                 )
