@@ -2,6 +2,8 @@
 Tests for the ModelManager class.
 """
 
+import asyncio
+
 import pytest
 from datetime import datetime
 from unittest.mock import Mock, patch, AsyncMock, create_autospec
@@ -612,6 +614,29 @@ class TestModelManagerDeviceAndBatchSize:
 
         assert mock_get_tagger.call_args.kwargs["device"] == device
         assert mock_get_tagger.call_args.kwargs["quantize"] is expected_quantize
+
+    @pytest.mark.asyncio
+    async def test_concurrent_first_requests_load_tagger_once(self, mock_model_manager):
+        """Requests arriving while a model downloads must share one tagger instead of each loading a copy."""
+        files_present = False
+
+        async def fake_download(module):
+            nonlocal files_present
+            mock_model_manager.is_downloading[module] = True
+            await asyncio.sleep(0.05)
+            files_present = True
+            mock_model_manager.is_downloading[module] = False
+            return True
+
+        with patch.object(mock_model_manager, "_is_model_available", return_value=Mock()), \
+                patch.object(mock_model_manager, "_check_model_files_exist", side_effect=lambda *_: files_present), \
+                patch.object(mock_model_manager, "download_model", side_effect=fake_download) as mock_download, \
+                patch("app.core.model_manager.get_tagger", side_effect=lambda *_, **__: Mock()) as mock_get_tagger:
+            taggers = await asyncio.gather(*(mock_model_manager.get_or_load_model("lasla") for _ in range(5)))
+
+        assert mock_download.call_count == 1
+        assert mock_get_tagger.call_count == 1
+        assert all(tagger is taggers[0] for tagger in taggers)
 
 
 class TestModelManagerCheckModelFiles:

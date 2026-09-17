@@ -123,6 +123,7 @@ class ModelManager:
         self.iterator_processors: Dict[str, Callable[[], Tuple]] = {}
         self.download_locks: Dict[str, asyncio.Lock] = {}
         self.is_downloading: Dict[str, bool] = {}
+        self._load_locks: Dict[str, asyncio.Lock] = {}
         self.models: Dict[str, Any] = {}  # For backwards compatibility
         self._model_inference_locks: Dict[str, threading.Lock] = {}
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=get_n_workers())
@@ -496,6 +497,14 @@ class ModelManager:
                     self._metrics.get_model_metrics(module).last_used_at = datetime.now()
             return self.taggers[module]
 
+        # Serialize loading per model so concurrent first requests share one tagger instead of each loading a copy
+        async with self._load_locks.setdefault(module, asyncio.Lock()):
+            if self.taggers.get(module):
+                return self.taggers[module]
+            return await self._load_model(module)
+
+    async def _load_model(self, module: str) -> object:
+        """Download (if needed) and load a tagger. Callers must hold the model's load lock."""
         # Wait if currently downloading
         if self.is_downloading.get(module, False):
             logger.warning(f"⏳ Model '{module}' is currently being downloaded...")
