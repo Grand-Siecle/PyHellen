@@ -13,6 +13,7 @@ class PieLanguage(str, Enum):
     fr = "Classical French"
     dum = "Old Dutch"
     occ_cont = "Occitan Contemporain"
+    frm = "Middle French"
 
     @classmethod
     def get_description(cls, name: str) -> str:

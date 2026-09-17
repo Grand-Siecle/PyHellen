@@ -71,7 +71,7 @@ class TestDatabaseModule:
     def test_model_repo_get_all_builtin(self, model_repo):
         """Test that builtin models are created on initialization."""
         models = model_repo.get_all()
-        assert len(models) == 7  # 7 builtin models
+        assert len(models) == 8  # 8 builtin models
 
         # Check that all are builtin and active
         for model in models:

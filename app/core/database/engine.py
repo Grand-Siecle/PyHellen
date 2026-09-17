@@ -144,6 +144,13 @@ class DatabaseEngine:
                 "pie_module": "occ_cont",
                 "priority": 7,
             },
+            {
+                "code": "frm",
+                "name": "Middle French",
+                "description": "Tagger for Middle French texts",
+                "pie_module": "frm",
+                "priority": 8,
+            },
         ]
 
         with self.get_session() as session:
