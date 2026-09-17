@@ -1,6 +1,6 @@
 import semver
-from typing import Dict, Any, List
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Annotated, Dict, Any, List
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from pydantic import Field, field_validator
 
 
@@ -33,7 +33,10 @@ class Settings(BaseSettings):
     )
 
     # CORS Settings
-    cors_origins: List[str] = Field(default=["*"], description="Allowed CORS origins. Use ['*'] for development only!")
+    # NoDecode: values are comma-separated strings (see parse_cors_origins), not JSON
+    cors_origins: Annotated[List[str], NoDecode] = Field(
+        default=["*"], description="Allowed CORS origins. Use ['*'] for development only!"
+    )
     cors_allow_credentials: bool = Field(
         default=False, description="Allow credentials in CORS. Cannot be True if cors_origins contains '*'"
     )
@@ -44,7 +47,7 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = Field(default=60, ge=1, description="Rate limit time window in seconds")
 
     # Model management
-    preload_models: List[str] = Field(
+    preload_models: Annotated[List[str], NoDecode] = Field(
         default_factory=list, description="Models to preload at startup (e.g., ['lasla', 'grc'])"
     )
 

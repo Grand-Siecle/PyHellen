@@ -260,3 +260,38 @@ class TestCacheSettings:
         assert stats["ttl_seconds"] == 60
         assert stats["max_size"] == 5
         assert stats["persistence_enabled"] is False
+
+
+class TestSettingsEnvironmentParsing:
+    """List settings are documented as comma-separated strings in .env and environment variables."""
+
+    def test_env_template_loads(self, tmp_path):
+        """`cp edit_dot_env .env` is the documented setup and must not crash at startup."""
+        from pathlib import Path
+        from app.core.settings import Settings
+
+        env_file = tmp_path / ".env"
+        env_file.write_text((Path(__file__).parent.parent / "edit_dot_env").read_text())
+
+        settings = Settings(_env_file=env_file)
+
+        assert settings.cors_origins == ["*"]
+        assert settings.preload_models == []
+
+    def test_comma_separated_lists_from_environment(self, monkeypatch):
+        from app.core.settings import Settings
+
+        monkeypatch.setenv("CORS_ORIGINS", "https://a.example, https://b.example")
+        monkeypatch.setenv("PRELOAD_MODELS", "lasla,grc")
+
+        settings = Settings()
+
+        assert settings.cors_origins == ["https://a.example", "https://b.example"]
+        assert settings.preload_models == ["lasla", "grc"]
+
+    def test_empty_preload_models_from_environment(self, monkeypatch):
+        from app.core.settings import Settings
+
+        monkeypatch.setenv("PRELOAD_MODELS", "")
+
+        assert Settings().preload_models == []
