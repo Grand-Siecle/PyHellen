@@ -656,7 +656,7 @@ class TestModelManagerDeviceAndBatchSize:
         with patch.object(mock_model_manager, "_is_model_available", return_value=Mock()), \
                 patch.object(mock_model_manager, "_check_model_files_exist", side_effect=lambda *_: files_present), \
                 patch.object(mock_model_manager, "download_model", side_effect=fake_download) as mock_download, \
-                patch("app.core.model_manager.get_tagger", side_effect=lambda *_, **__: Mock()) as mock_get_tagger:
+                patch("app.core.model_manager.get_tagger", side_effect=lambda *_, **__: Mock(models=[])) as mock_get_tagger:
             taggers = await asyncio.gather(*(mock_model_manager.get_or_load_model("lasla") for _ in range(5)))
 
         assert mock_download.call_count == 1
