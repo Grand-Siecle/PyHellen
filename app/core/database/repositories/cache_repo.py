@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, delete, func, select, update
 
 from app.core.database.models import Model, CacheEntry
@@ -13,6 +14,10 @@ from app.core.logger import logger
 
 # Rows per statement, well below SQLite's bound-parameter limit
 _CHUNK_SIZE = 50
+
+# Limits are checked after this fraction of max_size/max_bytes has been written since the last check:
+# measuring the table reads every row (COUNT + SUM over large JSON rows), too costly on every write.
+_LIMIT_CHECK_FRACTION = 0.01
 
 _UPSERT_COLUMNS = (
     "model_id",
@@ -75,6 +80,10 @@ class CacheRepository(BaseRepository):
         self.max_size = max_size
         self.ttl_seconds = ttl_seconds
         self.max_bytes = max_bytes
+        self._model_ids: Dict[str, int] = {}
+        # Start "due" so the first write enforces limits on a pre-existing table
+        self._entries_since_check = max_size
+        self._bytes_since_check = max_bytes or 0
 
     def get_many(self, keys: Sequence[str]) -> Dict[str, Tuple[str, float]]:
         """
@@ -117,9 +126,17 @@ class CacheRepository(BaseRepository):
         """
         if not records:
             return 0
+        try:
+            return self._set_many(model_code, records)
+        except IntegrityError:
+            # The model was deleted and re-created with a new id since it was memoized
+            self._model_ids.pop(model_code, None)
+            return self._set_many(model_code, records)
+
+    def _set_many(self, model_code: str, records: Sequence[CacheRecord]) -> int:
         session = self._get_session()
         try:
-            model_id = session.exec(select(Model.id).where(Model.code == model_code)).first()
+            model_id = self._get_model_id(session, model_code)
             if model_id is None:
                 logger.warning(f"Cannot cache: model '{model_code}' not found")
                 return 0
@@ -148,11 +165,33 @@ class CacheRepository(BaseRepository):
                 )
                 session.exec(statement)
 
-            self._evict(session, now)
+            self._entries_since_check += len(rows)
+            self._bytes_since_check += sum(row["size_bytes"] for row in rows)
+            if self._limit_check_due():
+                self._evict(session, now)
+                self._entries_since_check = 0
+                self._bytes_since_check = 0
             session.commit()
             return len(rows)
+        except IntegrityError:
+            session.rollback()
+            raise
         finally:
             self._close_session(session)
+
+    def _get_model_id(self, session: Session, model_code: str) -> Optional[int]:
+        if model_code not in self._model_ids:
+            model_id = session.exec(select(Model.id).where(Model.code == model_code)).first()
+            if model_id is None:
+                return None
+            self._model_ids[model_code] = model_id
+        return self._model_ids[model_code]
+
+    def _limit_check_due(self) -> bool:
+        entries_step = max(1, int(self.max_size * _LIMIT_CHECK_FRACTION))
+        if self._entries_since_check >= entries_step:
+            return True
+        return self.max_bytes is not None and self._bytes_since_check >= self.max_bytes * _LIMIT_CHECK_FRACTION
 
     def _evict(self, session: Session, now: datetime) -> None:
         """Keep the table within max_size/max_bytes: drop expired entries first, then the least recently active."""

@@ -211,6 +211,50 @@ class TestDatabaseModule:
         assert set(found) == {"A", "B", "C"}
         assert found["C"][0] == "2"
 
+    def test_cache_repo_limits_checked_incrementally(self, db_engine):
+        """Limits are enforced every ~1% of writes (full size scans are costly), with a bounded overshoot."""
+        from app.core.database.repositories.cache_repo import CacheRepository
+
+        repo = CacheRepository(max_size=200, ttl_seconds=3600)
+        sizes = []
+        for i in range(300):
+            repo.set_many("lasla", [self._record(f"k{i}", i)])
+            sizes.append(repo.get_statistics()["size"])
+
+        assert max(sizes) <= 202
+        assert sizes[-1] >= 198
+
+    def test_cache_repo_does_not_scan_table_on_every_write(self, db_engine):
+        from unittest.mock import patch
+        from app.core.database.repositories.cache_repo import CacheRepository
+
+        repo = CacheRepository(max_size=10000, ttl_seconds=3600)
+        with patch.object(CacheRepository, "_size", autospec=True, return_value=(0, 0)) as size_scan:
+            for i in range(100):
+                repo.set_many("lasla", [self._record(f"k{i}", i)])
+
+        assert size_scan.call_count <= 2
+
+    def test_cache_repo_survives_model_recreation(self, db_engine):
+        """Model ids are memoized; a model deleted and re-created with a new id must not break writes."""
+        from sqlmodel import select
+        from app.core.database.models import Model
+        from app.core.database.repositories.cache_repo import CacheRepository
+
+        repo = CacheRepository(max_size=100, ttl_seconds=3600)
+        assert repo.set_many("lasla", [self._record("before", 1)]) == 1
+
+        with db_engine.get_session() as session:
+            model = session.exec(select(Model).where(Model.code == "lasla")).one()
+            data = model.model_dump(exclude={"id", "created_at", "updated_at"})
+            session.delete(model)
+            session.commit()
+            session.add(Model(**data))
+            session.commit()
+
+        assert repo.set_many("lasla", [self._record("after", 2)]) == 1
+        assert set(repo.get_many(["after"])) == {"after"}
+
     def test_cache_repo_clear(self, cache_repo):
         """Test clearing cache."""
         cache_repo.set_many("lasla", [self._record("k1", {"a": 1}), self._record("k2", {"b": 2})])
