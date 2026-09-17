@@ -61,6 +61,9 @@ docker run -p 8000:8000 \
   ghcr.io/grand-siecle/pyhellen:latest
 ```
 
+The CPU image sets `QUANTIZE_CPU=true` (INT8 models, ~35% faster inference with slightly different
+annotations). Pass `-e QUANTIZE_CPU=false` to get the same float annotations as the GPU image.
+
 ### Persistent Model Storage
 
 Models are stored in `/data/models` inside the container. Mount a volume to persist:

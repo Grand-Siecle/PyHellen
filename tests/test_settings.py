@@ -19,6 +19,7 @@ class TestSettingsValidation:
         assert settings.auth_enabled is False
         assert settings.batch_size == 256
         assert settings.enable_metrics is True
+        assert settings.quantize_cpu is False
 
     def test_version_semantic_validation_valid(self):
         """Test that valid semantic versions are accepted."""

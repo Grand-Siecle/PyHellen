@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     # Processing settings
     max_concurrent_processing: int = Field(default=10, ge=1, description="Maximum concurrent text processing tasks")
     batch_size: int = Field(default=256, ge=1, description="Batch size for model processing")
+    quantize_cpu: bool = Field(
+        default=False,
+        description="INT8-quantize models when running on CPU (~35% faster inference, slightly different "
+        "annotations than float models). Ignored on CUDA, where quantized ops are unsupported.",
+    )
 
     # Metrics
     enable_metrics: bool = Field(default=True, description="Enable metrics collection")

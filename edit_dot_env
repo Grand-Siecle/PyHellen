@@ -66,6 +66,10 @@ MAX_CONCURRENT_PROCESSING=10
 # Batch size for model processing
 BATCH_SIZE=256
 
+# INT8-quantize models when running on CPU (~35% faster inference, but annotations
+# can differ slightly from float models). Ignored on GPU (CUDA).
+QUANTIZE_CPU=false
+
 # Model download timeout in seconds
 DOWNLOAD_TIMEOUT_SECONDS=300
 
