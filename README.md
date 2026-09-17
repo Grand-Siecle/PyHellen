@@ -30,7 +30,7 @@ REST API for historical linguistic tagging using [Pie Extended](https://github.c
 | `lasla` | Classical Latin | `freem` | Early Modern French |
 | `grc` | Ancient Greek | `fr` | Classical French |
 | `fro` | Old French | `dum` | Old Dutch |
-| | | `occ_cont` | Occitan |
+| `frm` | Middle French | `occ_cont` | Occitan |
 
 ## Quick Start
 

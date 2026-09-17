@@ -501,6 +501,24 @@ class TestErrorHandling:
 
             assert response.status_code == status.HTTP_400_BAD_REQUEST
 
+    def test_backend_runtime_error_returns_500(self, client):
+        """Torch/CUDA failures (NotImplementedError, OOM...) are RuntimeError subclasses but server-side faults."""
+        with patch('app.routes.api.model_manager') as mock_mm, \
+             patch('app.routes.api.cache') as mock_cache:
+            mock_mm.get_or_load_model = AsyncMock(return_value=Mock())
+            mock_mm.process_text.side_effect = NotImplementedError(
+                "Could not run 'aten::quantized_gru.data' with arguments from the 'CUDA' backend."
+            )
+            mock_cache.get = AsyncMock(return_value=None)
+
+            response = client.post(
+                "/api/tag/lasla",
+                json={"text": "test", "lower": False}
+            )
+
+            assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert "quantized_gru" not in response.text
+
 
 class TestCacheEndpointDetails:
     """Test suite for detailed cache endpoint behavior."""

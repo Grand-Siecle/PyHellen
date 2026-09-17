@@ -18,6 +18,7 @@ services:
       - PIE_EXTENDED_DOWNLOADS=/data/models
       - PYTHONPATH=/app
       - USE_CUDA=0
+      - QUANTIZE_CPU=true
       - LOG_FORMAT=json
       - LOG_LEVEL=INFO
     restart: unless-stopped
