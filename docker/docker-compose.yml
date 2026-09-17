@@ -14,8 +14,10 @@ services:
       - "8000:8000"
     volumes:
       - model_data:/data/models
+      - db_data:/data/db
     environment:
       - PIE_EXTENDED_DOWNLOADS=/data/models
+      - TOKEN_DB_PATH=/data/db/tokens.db
       - PYTHONPATH=/app
       - USE_CUDA=0
       - QUANTIZE_CPU=true
@@ -58,8 +60,10 @@ services:
       - "8000:8000"
     volumes:
       - model_data:/data/models
+      - db_data:/data/db
     environment:
       - PIE_EXTENDED_DOWNLOADS=/data/models
+      - TOKEN_DB_PATH=/data/db/tokens.db
       - PYTHONPATH=/app
       - USE_CUDA=1
       - LOG_FORMAT=json
@@ -143,6 +147,9 @@ services:
 
 volumes:
   model_data:
+    driver: local
+  # SQLite database: tokens, audit logs, metrics and the persistent result cache
+  db_data:
     driver: local
   prometheus_data:
     driver: local
