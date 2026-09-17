@@ -105,8 +105,9 @@ def _handle_processing_error(model: str, error: Exception) -> None:
     if "failed to load" in error_msg.lower() or "failed to download" in error_msg.lower():
         raise HTTPException(status_code=503, detail=f"Model '{model}' could not be loaded. Please try again later.")
 
-    # Runtime errors during processing (usually client input issues or model limitations)
-    if isinstance(error, (RuntimeError, ValueError)):
+    # Invalid input rejected during processing. RuntimeError is deliberately excluded: torch/CUDA
+    # failures (NotImplementedError, OutOfMemoryError...) subclass it and are server-side faults.
+    if isinstance(error, ValueError):
         raise HTTPException(status_code=400, detail=f"Processing failed: {error_msg}")
 
     # Unexpected server errors
