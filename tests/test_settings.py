@@ -207,3 +207,56 @@ class TestSettingsTypes:
 
         settings = Settings()
         assert isinstance(settings.preload_models, list)
+
+
+class TestCacheSettings:
+    """Result cache configuration (all previously hard-coded in app/core/cache.py)."""
+
+    def test_cache_defaults(self):
+        from app.core.settings import Settings
+
+        settings = Settings()
+        assert settings.cache_enabled is True
+        assert settings.cache_persist is True
+        assert settings.cache_ttl_seconds == 7 * 24 * 3600
+        assert settings.cache_memory_max_entries == 1000
+        assert settings.cache_memory_max_bytes == 256 * 1024 * 1024
+        assert settings.cache_db_max_entries == 20000
+        assert settings.cache_db_max_bytes == 1024 * 1024 * 1024
+        assert settings.cache_max_entry_bytes == 1024 * 1024
+        assert settings.cache_cleanup_interval_seconds == 3600
+        assert settings.cache_store_text_preview is True
+
+    def test_cache_settings_from_environment(self, monkeypatch):
+        from app.core.settings import Settings
+
+        monkeypatch.setenv("CACHE_ENABLED", "false")
+        monkeypatch.setenv("CACHE_TTL_SECONDS", "60")
+        monkeypatch.setenv("CACHE_CLEANUP_INTERVAL_SECONDS", "0")
+
+        settings = Settings()
+        assert settings.cache_enabled is False
+        assert settings.cache_ttl_seconds == 60
+        assert settings.cache_cleanup_interval_seconds == 0
+
+    @pytest.mark.parametrize(
+        "field", ["cache_ttl_seconds", "cache_memory_max_entries", "cache_db_max_entries", "cache_max_entry_bytes"]
+    )
+    def test_cache_limits_must_be_positive(self, field):
+        from app.core.settings import Settings
+
+        with pytest.raises(ValidationError):
+            Settings(**{field: 0})
+
+    def test_cache_from_settings(self):
+        from app.core.cache import HybridCache
+        from app.core.settings import Settings
+
+        settings = Settings(cache_enabled=False, cache_ttl_seconds=60, cache_memory_max_entries=5, cache_persist=False)
+        cache = HybridCache.from_settings(settings)
+
+        stats = cache.stats
+        assert stats["enabled"] is False
+        assert stats["ttl_seconds"] == 60
+        assert stats["max_size"] == 5
+        assert stats["persistence_enabled"] is False

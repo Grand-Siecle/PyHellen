@@ -1,153 +1,200 @@
 """Repository for persistent cache management using SQLModel."""
 
-import hashlib
-import json
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from sqlmodel import Session, select, func, col
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlmodel import Session, col, delete, func, select, update
 
 from app.core.database.models import Model, CacheEntry
 from app.core.database.repositories.base import BaseRepository
 from app.core.logger import logger
 
+# Rows per statement, well below SQLite's bound-parameter limit
+_CHUNK_SIZE = 50
+
+_UPSERT_COLUMNS = (
+    "model_id",
+    "text_hash",
+    "text_preview",
+    "result_json",
+    "created_at",
+    "expires_at",
+    "hit_count",
+    "last_hit_at",
+    "size_bytes",
+)
+
+
+@dataclass
+class CacheRecord:
+    """A serialized result ready to be persisted. Keys are computed by the caller (HybridCache)."""
+
+    key: str
+    result_json: str
+    expires_at: float  # Unix timestamp
+    text_hash: str = ""
+    text_preview: Optional[str] = None
+
+
+def _utcnow() -> datetime:
+    """Naive UTC datetime, matching how timestamps are stored."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _to_datetime(timestamp: float) -> datetime:
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc).replace(tzinfo=None)
+
+
+def _to_timestamp(value: datetime) -> float:
+    return value.replace(tzinfo=timezone.utc).timestamp()
+
+
+def _chunks(items: Sequence, size: int = _CHUNK_SIZE):
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
 
 class CacheRepository(BaseRepository):
     """
-    Repository for persistent LRU cache with TTL.
+    SQLite storage for cached tagging results.
 
-    Replaces the in-memory cache with SQLite-backed storage,
-    providing persistence across restarts.
+    Works on pre-computed keys and JSON payloads so that all hashing and serialization stays in HybridCache.
+    Methods are synchronous; HybridCache calls them from a worker thread.
     """
 
-    def __init__(self, session: Optional[Session] = None, max_size: int = 1000, ttl_seconds: int = 3600):
+    def __init__(
+        self,
+        session: Optional[Session] = None,
+        max_size: int = 1000,
+        ttl_seconds: float = 3600,
+        max_bytes: Optional[int] = None,
+    ):
         super().__init__(session)
         self.max_size = max_size
         self.ttl_seconds = ttl_seconds
+        self.max_bytes = max_bytes
 
-    @staticmethod
-    def _generate_key(model: str, text: str, lower: bool) -> str:
-        """Generate a unique cache key from the input parameters."""
-        content = f"{model}:{text}:{lower}"
-        return hashlib.sha256(content.encode()).hexdigest()[:32]
-
-    @staticmethod
-    def _generate_text_hash(text: str) -> str:
-        """Generate a hash of the text for storage."""
-        return hashlib.sha256(text.encode()).hexdigest()[:16]
-
-    def get(self, model_code: str, text: str, lower: bool) -> Optional[Any]:
+    def get_many(self, keys: Sequence[str]) -> Dict[str, Tuple[str, float]]:
         """
-        Get a value from the cache.
+        Return {key: (result_json, expires_at timestamp)} for the non-expired keys found.
 
-        Returns cached value if found and not expired, None otherwise.
-        Updates hit count on successful retrieval.
+        Hit counters of found entries are updated in the same transaction.
         """
-        cache_key = self._generate_key(model_code, text, lower)
-        now = datetime.utcnow()
-
+        if not keys:
+            return {}
+        now = _utcnow()
         session = self._get_session()
         try:
-            entry = session.exec(select(CacheEntry).where(CacheEntry.cache_key == cache_key)).first()
-
-            if not entry:
-                return None
-
-            # Check expiration
-            if now > entry.expires_at:
-                session.delete(entry)
-                session.commit()
-                return None
-
-            # Update hit count and last_hit_at
-            entry.hit_count += 1
-            entry.last_hit_at = now
-            session.add(entry)
-            session.commit()
-
-            return json.loads(entry.result_json)
-        finally:
-            self._close_session(session)
-
-    def set(self, model_code: str, text: str, lower: bool, value: Any) -> bool:
-        """
-        Set a value in the cache.
-
-        Implements LRU eviction when max_size is reached.
-        """
-        cache_key = self._generate_key(model_code, text, lower)
-        text_hash = self._generate_text_hash(text)
-        text_preview = text[:100] if len(text) > 100 else text
-        result_json = json.dumps(value)
-        size_bytes = len(result_json.encode())
-        now = datetime.utcnow()
-        expires_at = now + timedelta(seconds=self.ttl_seconds)
-
-        session = self._get_session()
-        try:
-            # Get model
-            model = session.exec(select(Model).where(Model.code == model_code)).first()
-
-            if not model:
-                logger.warning(f"Cannot cache: model '{model_code}' not found")
-                return False
-
-            # Check current cache size and evict if necessary
-            count = session.exec(select(func.count(CacheEntry.id))).one()
-
-            if count >= self.max_size:
-                # Delete oldest entries (LRU based on last_hit_at, then created_at)
-                entries_to_delete = count - self.max_size + 1
-                old_entries = session.exec(
-                    select(CacheEntry)
-                    .order_by(col(CacheEntry.last_hit_at).asc().nullsfirst(), CacheEntry.created_at.asc())
-                    .limit(entries_to_delete)
+            found: Dict[str, Tuple[str, float]] = {}
+            for chunk in _chunks(list(keys)):
+                rows = session.exec(
+                    select(CacheEntry.cache_key, CacheEntry.result_json, CacheEntry.expires_at).where(
+                        col(CacheEntry.cache_key).in_(chunk), CacheEntry.expires_at > now
+                    )
                 ).all()
+                for key, result_json, expires_at in rows:
+                    found[key] = (result_json, _to_timestamp(expires_at))
 
-                for old_entry in old_entries:
-                    session.delete(old_entry)
-
-            # Check if entry already exists
-            existing = session.exec(select(CacheEntry).where(CacheEntry.cache_key == cache_key)).first()
-
-            if existing:
-                existing.result_json = result_json
-                existing.expires_at = expires_at
-                existing.size_bytes = size_bytes
-                existing.hit_count = 0
-                existing.last_hit_at = None
-                session.add(existing)
-            else:
-                entry = CacheEntry(
-                    cache_key=cache_key,
-                    model_id=model.id,
-                    text_hash=text_hash,
-                    text_preview=text_preview,
-                    result_json=result_json,
-                    created_at=now,
-                    expires_at=expires_at,
-                    size_bytes=size_bytes,
-                )
-                session.add(entry)
-
-            session.commit()
-            return True
+            if found:
+                for chunk in _chunks(list(found)):
+                    session.exec(
+                        update(CacheEntry)
+                        .where(col(CacheEntry.cache_key).in_(chunk))
+                        .values(hit_count=CacheEntry.hit_count + 1, last_hit_at=now)
+                    )
+                session.commit()
+            return found
         finally:
             self._close_session(session)
 
-    def delete(self, model_code: str, text: str, lower: bool) -> bool:
-        """Delete a specific cache entry."""
-        cache_key = self._generate_key(model_code, text, lower)
+    def set_many(self, model_code: str, records: Sequence[CacheRecord]) -> int:
+        """
+        Insert or replace records, then evict entries if the table exceeds its limits.
 
+        Returns the number of stored records (0 if the model is unknown).
+        """
+        if not records:
+            return 0
         session = self._get_session()
         try:
-            entry = session.exec(select(CacheEntry).where(CacheEntry.cache_key == cache_key)).first()
+            model_id = session.exec(select(Model.id).where(Model.code == model_code)).first()
+            if model_id is None:
+                logger.warning(f"Cannot cache: model '{model_code}' not found")
+                return 0
 
-            if entry:
-                session.delete(entry)
-                session.commit()
-                return True
-            return False
+            now = _utcnow()
+            rows = [
+                {
+                    "cache_key": record.key,
+                    "model_id": model_id,
+                    "text_hash": record.text_hash,
+                    "text_preview": record.text_preview,
+                    "result_json": record.result_json,
+                    "created_at": now,
+                    "expires_at": _to_datetime(record.expires_at),
+                    "hit_count": 0,
+                    "last_hit_at": None,
+                    "size_bytes": len(record.result_json),
+                }
+                for record in records
+            ]
+            for chunk in _chunks(rows):
+                statement = sqlite_insert(CacheEntry).values(chunk)
+                statement = statement.on_conflict_do_update(
+                    index_elements=[CacheEntry.cache_key],
+                    set_={column: statement.excluded[column] for column in _UPSERT_COLUMNS},
+                )
+                session.exec(statement)
+
+            self._evict(session, now)
+            session.commit()
+            return len(rows)
+        finally:
+            self._close_session(session)
+
+    def _evict(self, session: Session, now: datetime) -> None:
+        """Keep the table within max_size/max_bytes: drop expired entries first, then the least recently active."""
+        count, total_bytes = self._size(session)
+        if not self._over_limits(count, total_bytes):
+            return
+
+        session.exec(delete(CacheEntry).where(CacheEntry.expires_at <= now))
+        count, total_bytes = self._size(session)
+        if not self._over_limits(count, total_bytes):
+            return
+
+        excess_entries = count - self.max_size
+        excess_bytes = total_bytes - self.max_bytes if self.max_bytes is not None else 0
+        victims: List[int] = []
+        oldest_first = session.exec(
+            select(CacheEntry.id, CacheEntry.size_bytes).order_by(
+                func.coalesce(CacheEntry.last_hit_at, CacheEntry.created_at).asc(), CacheEntry.id.asc()
+            )
+        )
+        for entry_id, size_bytes in oldest_first:
+            if excess_entries <= 0 and excess_bytes <= 0:
+                break
+            victims.append(entry_id)
+            excess_entries -= 1
+            excess_bytes -= size_bytes
+        for chunk in _chunks(victims, 500):
+            session.exec(delete(CacheEntry).where(col(CacheEntry.id).in_(chunk)))
+
+    def _size(self, session: Session) -> Tuple[int, int]:
+        return session.exec(select(func.count(CacheEntry.id), func.coalesce(func.sum(CacheEntry.size_bytes), 0))).one()
+
+    def _over_limits(self, count: int, total_bytes: int) -> bool:
+        return count > self.max_size or (self.max_bytes is not None and total_bytes > self.max_bytes)
+
+    def delete(self, key: str) -> bool:
+        """Delete a specific cache entry."""
+        session = self._get_session()
+        try:
+            result = session.exec(delete(CacheEntry).where(CacheEntry.cache_key == key))
+            session.commit()
+            return result.rowcount > 0
         finally:
             self._close_session(session)
 
@@ -155,14 +202,8 @@ class CacheRepository(BaseRepository):
         """Clear all cache entries. Returns number of cleared entries."""
         session = self._get_session()
         try:
-            entries = list(session.exec(select(CacheEntry)).all())
-            count = len(entries)
-
-            for entry in entries:
-                session.delete(entry)
-
+            count = session.exec(delete(CacheEntry)).rowcount
             session.commit()
-            logger.info(f"Cache cleared: {count} entries removed")
             return count
         finally:
             self._close_session(session)
@@ -171,39 +212,21 @@ class CacheRepository(BaseRepository):
         """Clear all cache entries for a specific model."""
         session = self._get_session()
         try:
-            model = session.exec(select(Model).where(Model.code == model_code)).first()
-
-            if not model:
+            model_id = session.exec(select(Model.id).where(Model.code == model_code)).first()
+            if model_id is None:
                 return 0
-
-            entries = list(session.exec(select(CacheEntry).where(CacheEntry.model_id == model.id)).all())
-
-            count = len(entries)
-            for entry in entries:
-                session.delete(entry)
-
+            count = session.exec(delete(CacheEntry).where(CacheEntry.model_id == model_id)).rowcount
             session.commit()
-            if count > 0:
-                logger.info(f"Cleared {count} cache entries for model '{model_code}'")
             return count
         finally:
             self._close_session(session)
 
     def cleanup_expired(self) -> int:
         """Remove expired entries. Returns number of removed entries."""
-        now = datetime.utcnow()
-
         session = self._get_session()
         try:
-            expired = list(session.exec(select(CacheEntry).where(CacheEntry.expires_at < now)).all())
-
-            count = len(expired)
-            for entry in expired:
-                session.delete(entry)
-
+            count = session.exec(delete(CacheEntry).where(CacheEntry.expires_at <= _utcnow())).rowcount
             session.commit()
-            if count > 0:
-                logger.info(f"Cache cleanup: {count} expired entries removed")
             return count
         finally:
             self._close_session(session)
@@ -212,9 +235,8 @@ class CacheRepository(BaseRepository):
         """Get cache statistics."""
         session = self._get_session()
         try:
-            total = session.exec(select(func.count(CacheEntry.id))).one()
+            total, total_size = self._size(session)
             total_hits = session.exec(select(func.coalesce(func.sum(CacheEntry.hit_count), 0))).one()
-            total_size = session.exec(select(func.coalesce(func.sum(CacheEntry.size_bytes), 0))).one()
 
             # Per-model stats
             model_stats = session.exec(
@@ -226,6 +248,7 @@ class CacheRepository(BaseRepository):
             return {
                 "size": total,
                 "max_size": self.max_size,
+                "max_bytes": self.max_bytes,
                 "ttl_seconds": self.ttl_seconds,
                 "total_hits": total_hits,
                 "total_size_bytes": total_size,

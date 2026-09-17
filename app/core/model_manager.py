@@ -16,7 +16,7 @@ from pie_extended.pipeline.iterators.proto import DataIterator
 from pie_extended.pipeline.postprocessor.proto import ProcessorPrototype
 from fastapi import HTTPException
 
-from app.core.utils import get_path_models, get_device, get_n_workers
+from app.core.utils import get_path_models, get_device, get_n_workers, quantization_enabled
 from app.core.logger import logger
 from app.core.settings import settings
 from app.schemas.nlp import ModelStatusSchema
@@ -543,7 +543,7 @@ class ModelManager:
                 batch_size=self.batch_size,
                 device=device,
                 model_path=None,
-                quantize=settings.quantize_cpu and device == "cpu",
+                quantize=quantization_enabled(device),
                 cache=False,
             )
 
@@ -670,16 +670,8 @@ class ModelManager:
         if not tagger:
             raise HTTPException(status_code=500, detail=f"Failed to load tagger for '{model_name}'")
 
-        results = [None] * len(texts)
-        tasks_to_process = []
-
-        # Check cache first
-        for idx, text in enumerate(texts):
-            cached = await cache.get(model_name, text, lower)
-            if cached is not None:
-                results[idx] = cached
-            else:
-                tasks_to_process.append((idx, text))
+        results = await cache.get_many(model_name, texts, lower)
+        tasks_to_process = [(idx, text) for idx, text in enumerate(texts) if results[idx] is None]
 
         # Process uncached texts concurrently
         if tasks_to_process:
@@ -687,9 +679,7 @@ class ModelManager:
 
             async def process_with_semaphore(idx: int, text: str):
                 async with semaphore:
-                    result = await self.process_text_async(model_name, tagger, text, lower)
-                    await cache.set(model_name, text, lower, result)
-                    return idx, result
+                    return idx, await self.process_text_async(model_name, tagger, text, lower)
 
             tasks = [process_with_semaphore(idx, text) for idx, text in tasks_to_process]
 
@@ -701,6 +691,8 @@ class ModelManager:
                     raise item
                 idx, result = item
                 results[idx] = result
+
+            await cache.set_many(model_name, [(texts[idx], results[idx]) for idx, _ in tasks_to_process], lower)
 
         return results
 

@@ -61,6 +61,31 @@ class Settings(BaseSettings):
         "annotations than float models). Ignored on CUDA, where quantized ops are unsupported.",
     )
 
+    # Result cache
+    cache_enabled: bool = Field(default=True, description="Cache tagging results (memory + SQLite)")
+    cache_persist: bool = Field(default=True, description="Persist cached results to SQLite so they survive restarts")
+    cache_ttl_seconds: int = Field(
+        default=7 * 24 * 3600,
+        ge=1,
+        description="Lifetime of a cached result. Keys include model/library versions and inference settings, "
+        "so a long TTL never serves outdated annotations.",
+    )
+    cache_memory_max_entries: int = Field(default=1000, ge=1, description="Maximum results kept in memory")
+    cache_memory_max_bytes: int = Field(
+        default=256 * 1024 * 1024, ge=1, description="Maximum JSON size of results kept in memory"
+    )
+    cache_db_max_entries: int = Field(default=20000, ge=1, description="Maximum results kept in SQLite")
+    cache_db_max_bytes: int = Field(default=1024 * 1024 * 1024, ge=1, description="Maximum JSON size kept in SQLite")
+    cache_max_entry_bytes: int = Field(
+        default=1024 * 1024, ge=1, description="Results larger than this (JSON bytes) are not cached"
+    )
+    cache_cleanup_interval_seconds: int = Field(
+        default=3600, ge=0, description="Interval of the background purge of expired entries (0 disables it)"
+    )
+    cache_store_text_preview: bool = Field(
+        default=True, description="Store the first 100 characters of each text in SQLite for inspection"
+    )
+
     # Metrics
     enable_metrics: bool = Field(default=True, description="Enable metrics collection")
 
