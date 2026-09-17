@@ -6,7 +6,7 @@ import asyncio
 import pytest
 import time
 
-from app.core.cache import LRUCache, CacheEntry
+from app.core.cache import LRUCache, CacheEntry, HybridCache
 
 
 class TestLRUCache:
@@ -28,11 +28,11 @@ class TestLRUCache:
     @pytest.mark.asyncio
     async def test_cache_key_uniqueness(self, cache):
         """Test that different parameters produce different cache keys."""
-        await cache.set("model1", "text", False, {"lower": False})
-        await cache.set("model1", "text", True, {"lower": True})
+        await cache.set("model1", "Text", False, {"lower": False})
+        await cache.set("model1", "Text", True, {"lower": True})
 
-        result1 = await cache.get("model1", "text", False)
-        result2 = await cache.get("model1", "text", True)
+        result1 = await cache.get("model1", "Text", False)
+        result2 = await cache.get("model1", "Text", True)
 
         assert result1 == {"lower": False}
         assert result2 == {"lower": True}
@@ -333,3 +333,226 @@ class TestCacheRaceConditions:
         # Gets should return either initial or updated
         get_results = [r for r in results if r is not None]
         assert all(r in ["initial", "updated"] for r in get_results)
+
+
+class TestCacheKeyVersioning:
+    """Results must never be served across model/library versions or inference settings."""
+
+    @pytest.mark.asyncio
+    async def test_fingerprint_change_invalidates_entries(self):
+        fingerprint = {"value": "pie=0.1.5|quantize=False"}
+        cache = HybridCache(persist=False, fingerprint=lambda model: fingerprint["value"])
+        await cache.set("freem", "Et le Roy", False, "float result")
+
+        fingerprint["value"] = "pie=0.1.5|quantize=True"
+
+        assert await cache.get("freem", "Et le Roy", False) is None
+
+    @pytest.mark.asyncio
+    async def test_fingerprint_receives_model_name(self):
+        seen = []
+        cache = HybridCache(persist=False, fingerprint=lambda model: seen.append(model) or "v1")
+        await cache.set("lasla", "Gallia", False, "r")
+        await cache.get("lasla", "Gallia", False)
+        assert set(seen) == {"lasla"}
+
+    @pytest.mark.asyncio
+    async def test_lower_flag_shares_entry_with_equivalent_text(self, cache):
+        """process_text lowercases before tagging, so ("ABC", lower=True) and ("abc", lower=False) are the same input."""
+        await cache.set("m", "ABC", True, "tagged abc")
+
+        assert await cache.get("m", "abc", False) == "tagged abc"
+        assert await cache.get("m", "ABC", False) is None
+
+
+class TestCacheLimits:
+    """Configurable switches and size limits."""
+
+    @pytest.mark.asyncio
+    async def test_disabled_cache_stores_nothing(self):
+        cache = HybridCache(persist=False, enabled=False)
+        await cache.set("m", "text", False, "value")
+        assert await cache.get("m", "text", False) is None
+        assert cache.stats["memory_size"] == 0
+
+    @pytest.mark.asyncio
+    async def test_entry_larger_than_max_entry_bytes_is_not_cached(self):
+        cache = HybridCache(persist=False, max_entry_bytes=100)
+        await cache.set("m", "small", False, ["x"])
+        await cache.set("m", "big", False, ["x" * 500])
+
+        assert await cache.get("m", "small", False) == ["x"]
+        assert await cache.get("m", "big", False) is None
+
+    @pytest.mark.asyncio
+    async def test_memory_byte_budget_evicts_least_recently_used(self):
+        cache = HybridCache(max_size=1000, persist=False, max_bytes=250)
+        for name in ("a", "b", "c"):
+            await cache.set("m", name, False, [name * 90])  # ~96 bytes of JSON each
+        # 3 entries (~288 bytes) exceed 250 bytes: "a" (least recently used) must be gone
+        assert await cache.get("m", "a", False) is None
+        assert await cache.get("m", "b", False) == ["b" * 90]
+        assert await cache.get("m", "c", False) == ["c" * 90]
+        assert cache.stats["memory_bytes"] <= 250
+
+
+class TestCacheBulkOperations:
+    """get_many / set_many serve batch endpoints with one database round-trip."""
+
+    @pytest.mark.asyncio
+    async def test_get_many_preserves_order_and_counts(self, cache):
+        await cache.set("m", "t1", False, "v1")
+        await cache.set("m", "t3", False, "v3")
+
+        assert await cache.get_many("m", ["t1", "t2", "t3"], False) == ["v1", None, "v3"]
+        assert cache.stats["hits"] == 2
+        assert cache.stats["misses"] == 1
+
+    @pytest.mark.asyncio
+    async def test_set_many_then_get_many(self, cache):
+        await cache.set_many("m", [("t1", "v1"), ("t2", "v2")], False)
+        assert await cache.get_many("m", ["t2", "t1"], False) == ["v2", "v1"]
+
+    @pytest.mark.asyncio
+    async def test_bulk_operations_persist_to_database(self):
+        cache = HybridCache(max_size=10, ttl_seconds=60, persist=True)
+        await cache.clear()
+        await cache.set_many("lasla", [("Gallia est", ["g"]), ("omnis divisa", ["o"])], False)
+
+        restarted = HybridCache(max_size=10, ttl_seconds=60, persist=True)
+        assert await restarted.get_many("lasla", ["omnis divisa", "Gallia est", "absent"], False) == [
+            ["o"],
+            ["g"],
+            None,
+        ]
+
+
+class TestCacheGetOrCompute:
+    """Concurrent identical requests must share one computation."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_misses_compute_once(self, cache):
+        calls = 0
+
+        async def compute():
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0.05)
+            return ["tagged"]
+
+        outcomes = await asyncio.gather(*(cache.get_or_compute("m", "same text", False, compute) for _ in range(5)))
+
+        assert calls == 1
+        assert [value for value, _ in outcomes] == [["tagged"]] * 5
+        assert sorted(from_cache for _, from_cache in outcomes) == [False, True, True, True, True]
+        assert await cache.get("m", "same text", False) == ["tagged"]
+
+    @pytest.mark.asyncio
+    async def test_compute_error_propagates_and_is_not_cached(self, cache):
+        async def failing():
+            await asyncio.sleep(0.01)
+            raise RuntimeError("CUDA error")
+
+        outcomes = await asyncio.gather(
+            *(cache.get_or_compute("m", "text", False, failing) for _ in range(3)), return_exceptions=True
+        )
+        assert all(isinstance(outcome, RuntimeError) for outcome in outcomes)
+
+        async def working():
+            return "ok"
+
+        assert await cache.get_or_compute("m", "text", False, working) == ("ok", False)
+
+    @pytest.mark.asyncio
+    async def test_disabled_cache_always_computes(self):
+        cache = HybridCache(persist=False, enabled=False)
+        calls = 0
+
+        async def compute():
+            nonlocal calls
+            calls += 1
+            return "v"
+
+        await cache.get_or_compute("m", "t", False, compute)
+        await cache.get_or_compute("m", "t", False, compute)
+        assert calls == 2
+
+
+class TestCachePersistence:
+    """SQLite access must not block the event loop and must stay consistent with memory."""
+
+    @pytest.mark.asyncio
+    async def test_database_calls_run_outside_event_loop_thread(self):
+        import threading
+
+        loop_thread = threading.get_ident()
+        cache = HybridCache(max_size=10, ttl_seconds=60, persist=True)
+        repo = cache._get_repo()
+        threads = []
+        for name in ("get_many", "set_many"):
+            original = getattr(repo, name)
+
+            def spy(*args, _original=original, **kwargs):
+                threads.append(threading.get_ident())
+                return _original(*args, **kwargs)
+
+            setattr(repo, name, spy)
+
+        await cache.set("lasla", "Gallia", False, ["g"])
+        cache._cache.clear()
+        await cache.get("lasla", "Gallia", False)
+
+        assert len(threads) == 2
+        assert loop_thread not in threads
+
+    @pytest.mark.asyncio
+    async def test_promoted_entry_keeps_database_expiry(self):
+        cache = HybridCache(max_size=10, ttl_seconds=60, persist=True)
+        await cache.clear()
+        await cache.set("lasla", "Gallia", False, ["g"])
+        stored_expiry = cache._cache[cache._generate_key("lasla", "Gallia", False)].expires_at
+
+        await asyncio.sleep(0.05)
+        restarted = HybridCache(max_size=10, ttl_seconds=60, persist=True)
+        await restarted.get("lasla", "Gallia", False)
+        promoted_expiry = restarted._cache[restarted._generate_key("lasla", "Gallia", False)].expires_at
+
+        assert promoted_expiry == pytest.approx(stored_expiry, abs=1.0)
+        assert promoted_expiry < stored_expiry + 0.04  # not reset to "now + ttl"
+
+    @pytest.mark.asyncio
+    async def test_clear_counts_distinct_entries(self):
+        cache = HybridCache(max_size=10, ttl_seconds=60, persist=True)
+        await cache.clear()
+        await cache.set_many("lasla", [("a", 1), ("b", 2)], False)
+        await cache.set("grc", "c", False, 3)
+
+        assert await cache.clear_model("lasla") == 2
+        assert await cache.clear() == 1
+
+    @pytest.mark.asyncio
+    async def test_get_stats_includes_database(self):
+        cache = HybridCache(max_size=10, ttl_seconds=60, persist=True)
+        await cache.clear()
+        await cache.set("lasla", "Gallia", False, ["g"])
+
+        stats = await cache.get_stats()
+
+        assert stats["memory_size"] == 1
+        assert stats["database"]["size"] == 1
+
+
+class TestCacheCleanupTask:
+    """Expired entries are purged periodically without an explicit API call."""
+
+    @pytest.mark.asyncio
+    async def test_periodic_cleanup_removes_expired_entries(self):
+        cache = HybridCache(max_size=10, ttl_seconds=0.1, persist=False)
+        await cache.set("m", "text", False, "v")
+
+        task = cache.start_cleanup_task(interval_seconds=0.05)
+        try:
+            await asyncio.sleep(0.3)
+            assert cache.stats["memory_size"] == 0
+        finally:
+            task.cancel()

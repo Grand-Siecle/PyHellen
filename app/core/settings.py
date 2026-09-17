@@ -1,6 +1,6 @@
 import semver
-from typing import Dict, Any, List
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Annotated, Dict, Any, List
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from pydantic import Field, field_validator
 
 
@@ -33,7 +33,10 @@ class Settings(BaseSettings):
     )
 
     # CORS Settings
-    cors_origins: List[str] = Field(default=["*"], description="Allowed CORS origins. Use ['*'] for development only!")
+    # NoDecode: values are comma-separated strings (see parse_cors_origins), not JSON
+    cors_origins: Annotated[List[str], NoDecode] = Field(
+        default=["*"], description="Allowed CORS origins. Use ['*'] for development only!"
+    )
     cors_allow_credentials: bool = Field(
         default=False, description="Allow credentials in CORS. Cannot be True if cors_origins contains '*'"
     )
@@ -44,7 +47,7 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = Field(default=60, ge=1, description="Rate limit time window in seconds")
 
     # Model management
-    preload_models: List[str] = Field(
+    preload_models: Annotated[List[str], NoDecode] = Field(
         default_factory=list, description="Models to preload at startup (e.g., ['lasla', 'grc'])"
     )
 
@@ -59,6 +62,38 @@ class Settings(BaseSettings):
         default=False,
         description="INT8-quantize models when running on CPU (~35% faster inference, slightly different "
         "annotations than float models). Ignored on CUDA, where quantized ops are unsupported.",
+    )
+
+    char_cache_cpu_size: int = Field(
+        default=10000,
+        ge=0,
+        description="Entries of PaPie's char-embedding cache per sub-model on CPU (~2.5x faster tagging, identical "
+        "annotations, ~30 KB per entry). 0 disables it. Not used on CUDA, where it is slower.",
+    )
+
+    # Result cache
+    cache_enabled: bool = Field(default=True, description="Cache tagging results (memory + SQLite)")
+    cache_persist: bool = Field(default=True, description="Persist cached results to SQLite so they survive restarts")
+    cache_ttl_seconds: int = Field(
+        default=7 * 24 * 3600,
+        ge=1,
+        description="Lifetime of a cached result. Keys include model/library versions and inference settings, "
+        "so a long TTL never serves outdated annotations.",
+    )
+    cache_memory_max_entries: int = Field(default=1000, ge=1, description="Maximum results kept in memory")
+    cache_memory_max_bytes: int = Field(
+        default=256 * 1024 * 1024, ge=1, description="Maximum JSON size of results kept in memory"
+    )
+    cache_db_max_entries: int = Field(default=20000, ge=1, description="Maximum results kept in SQLite")
+    cache_db_max_bytes: int = Field(default=1024 * 1024 * 1024, ge=1, description="Maximum JSON size kept in SQLite")
+    cache_max_entry_bytes: int = Field(
+        default=1024 * 1024, ge=1, description="Results larger than this (JSON bytes) are not cached"
+    )
+    cache_cleanup_interval_seconds: int = Field(
+        default=3600, ge=0, description="Interval of the background purge of expired entries (0 disables it)"
+    )
+    cache_store_text_preview: bool = Field(
+        default=True, description="Store the first 100 characters of each text in SQLite for inspection"
     )
 
     # Metrics

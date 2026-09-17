@@ -21,6 +21,8 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.execute("PRAGMA journal_mode=WAL")
+    # Safe with WAL (no corruption risk) and avoids an fsync on every commit
+    cursor.execute("PRAGMA synchronous=NORMAL")
     cursor.close()
 
 

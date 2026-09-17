@@ -55,7 +55,7 @@ ENV PYTHONPATH=/app \
     LOG_LEVEL=INFO
 
 # Create model directory
-RUN mkdir -p /data/models
+RUN mkdir -p /data/models /data/db
 
 # Copy application code
 COPY app/ ./app/

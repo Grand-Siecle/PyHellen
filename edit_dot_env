@@ -70,11 +70,41 @@ BATCH_SIZE=256
 # can differ slightly from float models). Ignored on GPU (CUDA).
 QUANTIZE_CPU=false
 
+# PaPie char-embedding cache entries per sub-model on CPU (~2.5x faster, identical annotations,
+# ~30 KB of RAM per entry). 0 disables it. Not used on GPU, where it is slower.
+CHAR_CACHE_CPU_SIZE=10000
+
 # Model download timeout in seconds
 DOWNLOAD_TIMEOUT_SECONDS=300
 
 # Maximum retry attempts for failed downloads
 DOWNLOAD_MAX_RETRIES=3
+
+# ===================
+# Result Cache
+# ===================
+# Tagging results are cached in memory and in the SQLite database (TOKEN_DB_PATH).
+# Keys include model/library versions and inference settings, so a long TTL is safe.
+CACHE_ENABLED=true
+CACHE_PERSIST=true
+CACHE_TTL_SECONDS=604800
+
+# Memory tier limits (entries and total JSON bytes)
+CACHE_MEMORY_MAX_ENTRIES=1000
+CACHE_MEMORY_MAX_BYTES=268435456
+
+# SQLite tier limits (entries and total JSON bytes)
+CACHE_DB_MAX_ENTRIES=20000
+CACHE_DB_MAX_BYTES=1073741824
+
+# Results larger than this (JSON bytes) are not cached
+CACHE_MAX_ENTRY_BYTES=1048576
+
+# Background purge of expired entries, in seconds (0 disables it)
+CACHE_CLEANUP_INTERVAL_SECONDS=3600
+
+# Store the first 100 characters of each text in SQLite (set false for sensitive corpora)
+CACHE_STORE_TEXT_PREVIEW=true
 
 # ===================
 # Metrics

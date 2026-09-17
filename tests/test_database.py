@@ -138,28 +138,145 @@ class TestDatabaseModule:
     # Cache Repository Tests
     # ==================
 
-    def test_cache_repo_set_and_get(self, cache_repo):
-        """Test setting and getting cache values."""
-        cache_repo.set("lasla", "test text", False, {"result": "data"})
+    @staticmethod
+    def _record(key, value, ttl=3600, preview=None):
+        import json
+        import time
+        from app.core.database.repositories.cache_repo import CacheRecord
 
-        result = cache_repo.get("lasla", "test text", False)
-        assert result == {"result": "data"}
+        return CacheRecord(key=key, result_json=json.dumps(value), expires_at=time.time() + ttl, text_preview=preview)
+
+    def test_cache_repo_set_many_and_get_many(self, cache_repo):
+        """Stored records are returned by key with their JSON payload and expiry."""
+        record = self._record("k1", {"result": "data"})
+        assert cache_repo.set_many("lasla", [record, self._record("k2", [1])]) == 2
+
+        found = cache_repo.get_many(["k1", "k2", "missing"])
+
+        assert set(found) == {"k1", "k2"}
+        assert found["k1"][0] == '{"result": "data"}'
+        assert found["k1"][1] == pytest.approx(record.expires_at, abs=0.001)
 
     def test_cache_repo_miss(self, cache_repo):
-        """Test cache miss."""
-        result = cache_repo.get("lasla", "nonexistent", False)
-        assert result is None
+        """Unknown keys are simply absent from the result."""
+        assert cache_repo.get_many(["nonexistent"]) == {}
+
+    def test_cache_repo_get_many_skips_expired(self, cache_repo):
+        cache_repo.set_many("lasla", [self._record("old", 1, ttl=-10), self._record("new", 2)])
+        assert set(cache_repo.get_many(["old", "new"])) == {"new"}
+
+    def test_cache_repo_get_many_records_hits(self, cache_repo):
+        cache_repo.set_many("lasla", [self._record("k1", 1)])
+        cache_repo.get_many(["k1"])
+        cache_repo.get_many(["k1"])
+        assert cache_repo.get_statistics()["total_hits"] == 2
+
+    def test_cache_repo_unknown_model_is_skipped(self, cache_repo):
+        assert cache_repo.set_many("not_a_model", [self._record("k1", 1)]) == 0
+        assert cache_repo.get_many(["k1"]) == {}
+
+    def test_cache_repo_eviction_removes_expired_entries_first(self, db_engine):
+        """Expired entries used to survive eviction when they had been hit once, while valid ones were dropped."""
+        from app.core.database.repositories.cache_repo import CacheRepository
+
+        repo = CacheRepository(max_size=5, ttl_seconds=3600)
+        repo.set_many("lasla", [self._record("A", 1, ttl=-10), self._record("B", 1, ttl=-10)])
+        repo.set_many("lasla", [self._record(k, 1) for k in ("C", "D", "E")])
+        repo.set_many("lasla", [self._record("F", 1)])
+
+        assert set(repo.get_many(["C", "D", "E", "F"])) == {"C", "D", "E", "F"}
+        assert repo.get_statistics()["size"] == 4
+
+    def test_cache_repo_eviction_drops_least_recently_active(self, db_engine):
+        import time
+        from app.core.database.repositories.cache_repo import CacheRepository
+
+        repo = CacheRepository(max_size=3, ttl_seconds=3600)
+        for key in ("A", "B", "C"):
+            repo.set_many("lasla", [self._record(key, 1)])
+            time.sleep(0.01)
+        repo.get_many(["A"])  # A becomes the most recently used
+        repo.set_many("lasla", [self._record("D", 1)])
+
+        assert set(repo.get_many(["A", "B", "C", "D"])) == {"A", "C", "D"}
+
+    def test_cache_repo_overwriting_existing_key_does_not_evict(self, db_engine):
+        from app.core.database.repositories.cache_repo import CacheRepository
+
+        repo = CacheRepository(max_size=3, ttl_seconds=3600)
+        repo.set_many("lasla", [self._record(k, 1) for k in ("A", "B", "C")])
+        repo.set_many("lasla", [self._record("C", 2)])
+
+        found = repo.get_many(["A", "B", "C"])
+        assert set(found) == {"A", "B", "C"}
+        assert found["C"][0] == "2"
+
+    def test_cache_repo_limits_checked_incrementally(self, db_engine):
+        """Limits are enforced every ~1% of writes (full size scans are costly), with a bounded overshoot."""
+        from app.core.database.repositories.cache_repo import CacheRepository
+
+        repo = CacheRepository(max_size=200, ttl_seconds=3600)
+        sizes = []
+        for i in range(300):
+            repo.set_many("lasla", [self._record(f"k{i}", i)])
+            sizes.append(repo.get_statistics()["size"])
+
+        assert max(sizes) <= 202
+        assert sizes[-1] >= 198
+
+    def test_cache_repo_does_not_scan_table_on_every_write(self, db_engine):
+        from unittest.mock import patch
+        from app.core.database.repositories.cache_repo import CacheRepository
+
+        repo = CacheRepository(max_size=10000, ttl_seconds=3600)
+        with patch.object(CacheRepository, "_size", autospec=True, return_value=(0, 0)) as size_scan:
+            for i in range(100):
+                repo.set_many("lasla", [self._record(f"k{i}", i)])
+
+        assert size_scan.call_count <= 2
+
+    def test_cache_repo_survives_model_recreation(self, db_engine):
+        """Model ids are memoized; a model deleted and re-created with a new id must not break writes."""
+        from sqlmodel import select
+        from app.core.database.models import Model
+        from app.core.database.repositories.cache_repo import CacheRepository
+
+        repo = CacheRepository(max_size=100, ttl_seconds=3600)
+        assert repo.set_many("lasla", [self._record("before", 1)]) == 1
+
+        with db_engine.get_session() as session:
+            model = session.exec(select(Model).where(Model.code == "lasla")).one()
+            data = model.model_dump(exclude={"id", "created_at", "updated_at"})
+            session.delete(model)
+            session.commit()
+            session.add(Model(**data))
+            session.commit()
+
+        assert repo.set_many("lasla", [self._record("after", 2)]) == 1
+        assert set(repo.get_many(["after"])) == {"after"}
 
     def test_cache_repo_clear(self, cache_repo):
         """Test clearing cache."""
-        cache_repo.set("lasla", "text1", False, {"a": 1})
-        cache_repo.set("lasla", "text2", False, {"b": 2})
+        cache_repo.set_many("lasla", [self._record("k1", {"a": 1}), self._record("k2", {"b": 2})])
 
         count = cache_repo.clear()
         assert count == 2
 
         stats = cache_repo.get_statistics()
         assert stats["size"] == 0
+
+    def test_cache_repo_clear_by_model_and_cleanup(self, cache_repo):
+        cache_repo.set_many("lasla", [self._record("l1", 1), self._record("l2", 1, ttl=-10)])
+        cache_repo.set_many("grc", [self._record("g1", 1)])
+
+        assert cache_repo.cleanup_expired() == 1
+        assert cache_repo.clear_by_model("lasla") == 1
+        assert set(cache_repo.get_many(["l1", "g1"])) == {"g1"}
+
+    def test_sqlite_uses_normal_synchronous_mode(self, db_engine):
+        """WAL + synchronous=NORMAL avoids an fsync on every commit (cache writes)."""
+        with db_engine.engine.connect() as conn:
+            assert conn.exec_driver_sql("PRAGMA synchronous").scalar() == 1
 
     # ==================
     # Metrics Repository Tests
