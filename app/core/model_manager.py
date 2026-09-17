@@ -17,6 +17,7 @@ from pie_extended.pipeline.postprocessor.proto import ProcessorPrototype
 from fastapi import HTTPException
 
 from app.core.utils import get_path_models, get_device, get_n_workers, quantization_enabled
+from app.core.papie_cache import enable_char_embedding_cache, iter_char_embeddings
 from app.core.logger import logger
 from app.core.settings import settings
 from app.schemas.nlp import ModelStatusSchema
@@ -537,7 +538,8 @@ class ModelManager:
             # pie_extended >= 0.1.5 enables both options by default:
             # - quantize: INT8 RNN ops (aten::quantized_gru) only exist on CPU and crash on CUDA; opt-in on CPU
             #   because it slightly alters annotations compared to float models
-            # - cache: PaPie 0.6.0's char-embedding LRU raises KeyError once full and holds tensors in VRAM
+            # - cache: PaPie 0.6.0's char-embedding LRU raises KeyError once full; enabled below on CPU only,
+            #   with a fixed eviction (app/core/papie_cache.py)
             tagger = get_tagger(
                 module,
                 batch_size=self.batch_size,
@@ -549,6 +551,9 @@ class ModelManager:
 
             if not tagger:
                 raise RuntimeError(f"Failed to load tagger for model '{module}'")
+
+            if device == "cpu" and settings.char_cache_cpu_size > 0:
+                enable_char_embedding_cache(iter_char_embeddings(tagger), max_entries=settings.char_cache_cpu_size)
 
             # Try to import the iterator and processor
             try:

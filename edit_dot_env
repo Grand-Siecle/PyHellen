@@ -70,6 +70,10 @@ BATCH_SIZE=256
 # can differ slightly from float models). Ignored on GPU (CUDA).
 QUANTIZE_CPU=false
 
+# PaPie char-embedding cache entries per sub-model on CPU (~2.5x faster, identical annotations,
+# ~30 KB of RAM per entry). 0 disables it. Not used on GPU, where it is slower.
+CHAR_CACHE_CPU_SIZE=10000
+
 # Model download timeout in seconds
 DOWNLOAD_TIMEOUT_SECONDS=300
 

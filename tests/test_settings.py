@@ -226,6 +226,7 @@ class TestCacheSettings:
         assert settings.cache_max_entry_bytes == 1024 * 1024
         assert settings.cache_cleanup_interval_seconds == 3600
         assert settings.cache_store_text_preview is True
+        assert settings.char_cache_cpu_size == 10000
 
     def test_cache_settings_from_environment(self, monkeypatch):
         from app.core.settings import Settings

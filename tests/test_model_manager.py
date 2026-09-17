@@ -616,12 +616,29 @@ class TestModelManagerDeviceAndBatchSize:
                 patch("app.core.model_manager.settings.quantize_cpu", quantize_cpu), \
                 patch.object(mock_model_manager, "_is_model_available", return_value=Mock()), \
                 patch.object(mock_model_manager, "_check_model_files_exist", return_value=True), \
-                patch("app.core.model_manager.get_tagger", return_value=Mock()) as mock_get_tagger:
+                patch("app.core.model_manager.get_tagger", return_value=Mock(models=[])) as mock_get_tagger:
             await mock_model_manager.get_or_load_model("lasla")
 
         assert mock_get_tagger.call_args.kwargs["device"] == device
         assert mock_get_tagger.call_args.kwargs["quantize"] is expected_quantize
         assert mock_get_tagger.call_args.kwargs["cache"] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("device, size, expected", [("cpu", 5000, 5000), ("cpu", 0, None), ("cuda", 5000, None)])
+    async def test_char_embedding_cache_only_on_cpu(self, mock_model_manager, device, size, expected):
+        """PaPie's char cache speeds up CPU inference ~2.5x but slows GPU inference down."""
+        with patch("app.core.model_manager.get_device", return_value=device), \
+                patch("app.core.model_manager.settings.char_cache_cpu_size", size), \
+                patch.object(mock_model_manager, "_is_model_available", return_value=Mock()), \
+                patch.object(mock_model_manager, "_check_model_files_exist", return_value=True), \
+                patch("app.core.model_manager.get_tagger", return_value=Mock(models=[])), \
+                patch("app.core.model_manager.enable_char_embedding_cache") as enable_cache:
+            await mock_model_manager.get_or_load_model("lasla")
+
+        if expected is None:
+            enable_cache.assert_not_called()
+        else:
+            assert enable_cache.call_args.kwargs["max_entries"] == expected
 
     @pytest.mark.asyncio
     async def test_concurrent_first_requests_load_tagger_once(self, mock_model_manager):

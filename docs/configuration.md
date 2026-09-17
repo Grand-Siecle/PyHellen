@@ -64,6 +64,7 @@ CORS_ALLOW_CREDENTIALS=true
 |----------|-------------|---------|
 | `MAX_CONCURRENT_PROCESSING` | Max concurrent text processing tasks | `10` |
 | `BATCH_SIZE` | Batch size for model processing | `256` |
+| `CHAR_CACHE_CPU_SIZE` | PaPie char-embedding cache entries per sub-model on CPU (~2.5x faster, identical annotations, ~30 KB RAM per entry). `0` disables. Not used on GPU (slower there) | `10000` |
 | `QUANTIZE_CPU` | INT8-quantize models on CPU (~35% faster, annotations may differ slightly from float models). Ignored on GPU. Enabled in the CPU Docker image | `false` |
 | `DOWNLOAD_TIMEOUT_SECONDS` | Model download timeout | `300` |
 | `DOWNLOAD_MAX_RETRIES` | Download retry attempts | `3` |

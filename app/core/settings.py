@@ -64,6 +64,13 @@ class Settings(BaseSettings):
         "annotations than float models). Ignored on CUDA, where quantized ops are unsupported.",
     )
 
+    char_cache_cpu_size: int = Field(
+        default=10000,
+        ge=0,
+        description="Entries of PaPie's char-embedding cache per sub-model on CPU (~2.5x faster tagging, identical "
+        "annotations, ~30 KB per entry). 0 disables it. Not used on CUDA, where it is slower.",
+    )
+
     # Result cache
     cache_enabled: bool = Field(default=True, description="Cache tagging results (memory + SQLite)")
     cache_persist: bool = Field(default=True, description="Persist cached results to SQLite so they survive restarts")
