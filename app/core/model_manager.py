@@ -522,7 +522,12 @@ class ModelManager:
 
             # Load the tagger using pie_extended
             logger.info(f"☕ Loading tagger for model '{module}'...")
-            tagger = get_tagger(module, batch_size=self.batch_size, device=self.device, model_path=None)
+            device = self.device
+            # pie_extended >= 0.1.5 quantizes to INT8 by default, but quantized RNN ops
+            # (aten::quantized_gru/lstm) only exist on CPU and crash on CUDA.
+            tagger = get_tagger(
+                module, batch_size=self.batch_size, device=device, model_path=None, quantize=(device == "cpu")
+            )
 
             if not tagger:
                 raise RuntimeError(f"Failed to load tagger for model '{module}'")

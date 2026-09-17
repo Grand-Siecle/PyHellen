@@ -572,6 +572,19 @@ class TestModelManagerDeviceAndBatchSize:
         device = mock_model_manager.device
         assert device in ["cpu", "cuda"]
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("device, expected_quantize", [("cuda", False), ("cpu", True)])
+    async def test_load_model_quantizes_only_on_cpu(self, mock_model_manager, device, expected_quantize):
+        """INT8 dynamic quantization has no CUDA kernels (aten::quantized_gru), so it must be off on GPU."""
+        with patch("app.core.model_manager.get_device", return_value=device), \
+                patch.object(mock_model_manager, "_is_model_available", return_value=Mock()), \
+                patch.object(mock_model_manager, "_check_model_files_exist", return_value=True), \
+                patch("app.core.model_manager.get_tagger", return_value=Mock()) as mock_get_tagger:
+            await mock_model_manager.get_or_load_model("lasla")
+
+        assert mock_get_tagger.call_args.kwargs["device"] == device
+        assert mock_get_tagger.call_args.kwargs["quantize"] is expected_quantize
+
 
 class TestModelManagerCheckModelFiles:
     """Test suite for _check_model_files_exist method."""
