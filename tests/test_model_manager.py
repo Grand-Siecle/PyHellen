@@ -4,7 +4,11 @@ Tests for the ModelManager class.
 
 import pytest
 from datetime import datetime
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock, patch, AsyncMock, create_autospec
+
+from pie_extended.pipeline.iterators.proto import DataIterator
+from pie_extended.pipeline.postprocessor.proto import ProcessorPrototype
+from pie_extended.tagger import ExtensibleTagger
 
 from app.core.model_manager import ModelManager, ModelMetrics, GlobalMetrics
 from app.schemas.nlp import PieLanguage
@@ -100,7 +104,7 @@ class TestProcessText:
     def test_process_text_with_lower(self, mock_model_manager):
         """Test processing text with lowercase option."""
         mock_tagger = Mock()
-        mock_tagger.tag.return_value = [{"form": "test", "lemma": "test"}]
+        mock_tagger.tag_str.return_value = [{"form": "test", "lemma": "test"}]
 
         result = mock_model_manager.process_text(
             "model",
@@ -110,12 +114,12 @@ class TestProcessText:
         )
 
         # Should be called with lowercased text
-        mock_tagger.tag.assert_called_with("test text")
+        assert mock_tagger.tag_str.call_args.args[0] == "test text"
 
     def test_process_text_without_lower(self, mock_model_manager):
         """Test processing text without lowercase option."""
         mock_tagger = Mock()
-        mock_tagger.tag.return_value = [{"form": "TEST", "lemma": "test"}]
+        mock_tagger.tag_str.return_value = [{"form": "TEST", "lemma": "test"}]
 
         result = mock_model_manager.process_text(
             "model",
@@ -124,7 +128,7 @@ class TestProcessText:
             lower=False
         )
 
-        mock_tagger.tag.assert_called_with("TEST TEXT")
+        assert mock_tagger.tag_str.call_args.args[0] == "TEST TEXT"
 
     def test_process_text_with_custom_processor(self, mock_model_manager):
         """Test processing with custom iterator/processor."""
@@ -143,6 +147,30 @@ class TestProcessText:
         )
 
         mock_tagger.tag_str.assert_called_once()
+
+    def test_process_text_custom_processor_error_is_not_masked(self, mock_model_manager):
+        """A tagging error must propagate as-is instead of being replaced by a fallback error."""
+        mock_tagger = create_autospec(ExtensibleTagger, instance=True)
+        mock_tagger.tag_str.side_effect = NotImplementedError("Could not run 'aten::quantized_gru.data'")
+        mock_model_manager.iterator_processors["model"] = lambda: (Mock(), Mock())
+
+        with pytest.raises(NotImplementedError, match="quantized_gru"):
+            mock_model_manager.process_text("model", mock_tagger, "test text")
+
+        mock_tagger.tag.assert_not_called()
+
+    def test_process_text_without_custom_processor_uses_generic_pipeline(self, mock_model_manager):
+        """pie's Tagger.tag() expects pre-tokenized sentences, so raw text always goes through tag_str()."""
+        mock_tagger = create_autospec(ExtensibleTagger, instance=True)
+        mock_tagger.tag_str.return_value = [{"form": "test"}]
+
+        result = mock_model_manager.process_text("model", mock_tagger, "test text")
+
+        assert result == [{"form": "test"}]
+        kwargs = mock_tagger.tag_str.call_args.kwargs
+        assert isinstance(kwargs["iterator"], DataIterator)
+        assert isinstance(kwargs["processor"], ProcessorPrototype)
+        mock_tagger.tag.assert_not_called()
 
 
 class TestBatchProcessing:
@@ -166,7 +194,7 @@ class TestStreamProcessing:
     async def test_stream_process_yields_results(self, mock_model_manager):
         """Test that stream_process yields results for each text."""
         mock_tagger = Mock()
-        mock_tagger.tag.return_value = [{"form": "test"}]
+        mock_tagger.tag_str.return_value = [{"form": "test"}]
 
         with patch.object(mock_model_manager, 'get_or_load_model', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = mock_tagger
@@ -183,7 +211,7 @@ class TestStreamProcessing:
         import json
 
         mock_tagger = Mock()
-        mock_tagger.tag.return_value = [{"form": "test"}]
+        mock_tagger.tag_str.return_value = [{"form": "test"}]
 
         with patch.object(mock_model_manager, 'get_or_load_model', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = mock_tagger
@@ -207,7 +235,7 @@ class TestStreamProcessing:
     async def test_stream_process_sse_format(self, mock_model_manager):
         """Test SSE streaming format."""
         mock_tagger = Mock()
-        mock_tagger.tag.return_value = [{"form": "test"}]
+        mock_tagger.tag_str.return_value = [{"form": "test"}]
 
         with patch.object(mock_model_manager, 'get_or_load_model', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = mock_tagger
@@ -343,7 +371,7 @@ class TestModelManagerMetrics:
         """Test that process_text updates metrics."""
         manager = ModelManager()
         mock_tagger = Mock()
-        mock_tagger.tag.return_value = [{"form": "test"}]
+        mock_tagger.tag_str.return_value = [{"form": "test"}]
 
         initial_count = manager._metrics.total_requests
 
@@ -515,7 +543,7 @@ class TestModelManagerErrorHandling:
     def test_process_text_increments_error_on_failure(self, mock_model_manager):
         """Test that process_text updates error metrics on failure."""
         mock_tagger = Mock()
-        mock_tagger.tag.side_effect = RuntimeError("Processing failed")
+        mock_tagger.tag_str.side_effect = RuntimeError("Processing failed")
 
         initial_errors = mock_model_manager._metrics.total_errors if mock_model_manager._metrics else 0
 

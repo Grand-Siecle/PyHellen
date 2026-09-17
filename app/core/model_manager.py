@@ -12,6 +12,8 @@ import time
 
 import httpx
 from pie_extended.cli.utils import get_model, get_tagger
+from pie_extended.pipeline.iterators.proto import DataIterator
+from pie_extended.pipeline.postprocessor.proto import ProcessorPrototype
 from fastapi import HTTPException
 
 from app.core.utils import get_path_models, get_device, get_n_workers
@@ -590,17 +592,13 @@ class ModelManager:
 
             with lock:
                 # Get the appropriate iterator and processor if available
-                if model_name in self.iterator_processors and self.iterator_processors[model_name]:
-                    try:
-                        iterator, processor = self.iterator_processors[model_name]()
-                        result = tagger.tag_str(text, iterator=iterator, processor=processor)
-                    except Exception as e:
-                        logger.error(f"❌ Error using custom iterator/processor for '{model_name}': {e}")
-                        # Fall back to default tagging if custom iterator/processor fails
-                        result = tagger.tag(text)
+                get_iterator_and_processor = self.iterator_processors.get(model_name)
+                if get_iterator_and_processor:
+                    iterator, processor = get_iterator_and_processor()
                 else:
-                    # Use default tagging method if no custom iterator/processor is available
-                    result = tagger.tag(text)
+                    # Generic pipeline: pie's Tagger.tag() expects pre-tokenized sentences, not raw text
+                    iterator, processor = DataIterator(), ProcessorPrototype()
+                result = tagger.tag_str(text, iterator=iterator, processor=processor)
 
             # Update metrics (thread-safe)
             process_time = (time.time() - start_time) * 1000
