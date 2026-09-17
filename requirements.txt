@@ -1,4 +1,7 @@
-git+https://github.com/hipster-philology/nlp-pie-taggers.git@master #pie extended
+# Pie Extended: pinned, an unpinned @master rebuild pulled 0.1.5 (INT8 quantization on by default).
+# PaPie is pinned too since pie-extended only requires PaPie>=0.5.0 (no upper bound).
+pie-extended==0.1.5
+PaPie==0.6.0
 typing-extensions>=4.14.1,<5.0
 fastapi~=0.128.0
 pydantic~=2.12.5
