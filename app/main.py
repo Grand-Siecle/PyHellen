@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import os
 from contextlib import asynccontextmanager
 
@@ -9,7 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routes.api import router as api_router
 from app.routes.service import router as service_router
 from app.routes.admin import router as admin_router
-from app.core.settings import Settings
+from app.core.settings import Settings, settings
+from app.core.cache import cache
 from app.core.logger import logger
 from app.core.model_manager import model_manager
 from app.core.environment import PIE_EXTENDED_DOWNLOADS
@@ -28,8 +31,6 @@ async def lifespan(app: FastAPI):
     - Startup: Initializes model manager, auth manager, preloads configured models
     - Shutdown: Gracefully shuts down model manager and clears resources
     """
-    from app.core.settings import settings
-
     # Initialize at startup
     logger.info("Starting up PyHellen API...")
     logger.info(f"Using PIE_EXTENDED_DOWNLOADS: {PIE_EXTENDED_DOWNLOADS}")
@@ -80,11 +81,22 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"Failed to preload model '{model_name}': {e}")
 
+    # Purge expired cache entries periodically
+    app.state.cache_cleanup_task = (
+        cache.start_cleanup_task(settings.cache_cleanup_interval_seconds)
+        if settings.cache_cleanup_interval_seconds > 0
+        else None
+    )
+
     try:
         yield
     finally:
         # Cleanup at shutdown
         logger.info("Shutting down PyHellen API...")
+        if app.state.cache_cleanup_task:
+            app.state.cache_cleanup_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await app.state.cache_cleanup_task
         # Clear models from memory (don't shutdown executor to avoid issues with pending requests)
         model_manager.taggers.clear()
         model_manager.iterator_processors.clear()

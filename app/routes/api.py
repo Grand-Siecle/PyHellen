@@ -1,6 +1,7 @@
 """NLP API routes with optional authentication and secure error handling."""
 
 from typing import List, Dict, Optional, Any
+import asyncio
 import time
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
@@ -92,6 +93,21 @@ def _validate_model(model: str) -> str:
     return validate_model_name(model, allowed)
 
 
+async def _tag_with_cache(model: str, text: str, lower: bool) -> "TagResponse":
+    """Serve a tagging request from the cache, or tag it off the event loop and cache the result."""
+    start_time = time.time()
+
+    async def compute():
+        tagger = await model_manager.get_or_load_model(model)
+        if not tagger:
+            raise HTTPException(status_code=503, detail=f"Model '{model}' could not be loaded")
+        return await model_manager.process_text_async(model, tagger, text, lower)
+
+    result, from_cache = await cache.get_or_compute(model, text, lower, compute)
+    processing_time = (time.time() - start_time) * 1000
+    return TagResponse(result=result, processing_time_ms=round(processing_time, 2), model=model, from_cache=from_cache)
+
+
 def _handle_processing_error(model: str, error: Exception) -> None:
     """Log error and raise appropriate HTTP exception based on error type."""
     error_msg = str(error)
@@ -155,29 +171,9 @@ async def tag_text_get(
     """
     # Validate model name
     model = _validate_model(model)
-    start_time = time.time()
 
     try:
-        # Check cache first
-        cached = await cache.get(model, text, lower)
-        if cached is not None:
-            processing_time = (time.time() - start_time) * 1000
-            return TagResponse(
-                result=cached, processing_time_ms=round(processing_time, 2), model=model, from_cache=True
-            )
-
-        tagger = await model_manager.get_or_load_model(model)
-        if not tagger:
-            raise HTTPException(status_code=503, detail=f"Model '{model}' could not be loaded")
-
-        result = model_manager.process_text(model, tagger, text, lower)
-
-        # Cache the result
-        await cache.set(model, text, lower, result)
-
-        processing_time = (time.time() - start_time) * 1000
-        return TagResponse(result=result, processing_time_ms=round(processing_time, 2), model=model, from_cache=False)
-
+        return await _tag_with_cache(model, text, lower)
     except HTTPException:
         raise
     except Exception as e:
@@ -196,29 +192,9 @@ async def tag_text(model: str, input_data: TextInput, _: Optional[Token] = Depen
     """
     # Validate model name
     model = _validate_model(model)
-    start_time = time.time()
 
     try:
-        # Check cache first
-        cached = await cache.get(model, input_data.text, input_data.lower)
-        if cached is not None:
-            processing_time = (time.time() - start_time) * 1000
-            return TagResponse(
-                result=cached, processing_time_ms=round(processing_time, 2), model=model, from_cache=True
-            )
-
-        tagger = await model_manager.get_or_load_model(model)
-        if not tagger:
-            raise HTTPException(status_code=503, detail=f"Model '{model}' could not be loaded")
-
-        result = model_manager.process_text(model, tagger, input_data.text, input_data.lower)
-
-        # Cache the result
-        await cache.set(model, input_data.text, input_data.lower, result)
-
-        processing_time = (time.time() - start_time) * 1000
-        return TagResponse(result=result, processing_time_ms=round(processing_time, 2), model=model, from_cache=False)
-
+        return await _tag_with_cache(model, input_data.text, input_data.lower)
     except HTTPException:
         raise
     except Exception as e:
@@ -243,60 +219,34 @@ async def batch_process(
     # Validate model name
     model = _validate_model(model)
     start_time = time.time()
-    cache_hits = 0
+    texts, lower = batch_data.texts, batch_data.lower
 
     try:
-        if concurrent:
-            # Check cache first to count hits for this request
+        results = await cache.get_many(model, texts, lower)
+        cache_hits = sum(result is not None for result in results)
+
+        # Tag each distinct uncached text once
+        uncached: Dict[str, List[int]] = {}
+        for idx, result in enumerate(results):
+            if result is None:
+                uncached.setdefault(texts[idx], []).append(idx)
+
+        if uncached:
             tagger = await model_manager.get_or_load_model(model)
             if not tagger:
                 raise HTTPException(status_code=503, detail=f"Model '{model}' could not be loaded")
 
-            results = [None] * len(batch_data.texts)
-            texts_to_process = []
+            if concurrent:
+                tagged = await asyncio.gather(
+                    *(model_manager.process_text_async(model, tagger, text, lower) for text in uncached)
+                )
+            else:
+                tagged = [await model_manager.process_text_async(model, tagger, text, lower) for text in uncached]
 
-            for idx, text in enumerate(batch_data.texts):
-                cached = await cache.get(model, text, batch_data.lower)
-                if cached is not None:
-                    results[idx] = cached
-                    cache_hits += 1
-                else:
-                    texts_to_process.append((idx, text))
-
-            # Process uncached texts concurrently
-            if texts_to_process:
-                import asyncio
-
-                async def process_one(idx: int, text: str):
-                    result = await model_manager.process_text_async(model, tagger, text, batch_data.lower)
-                    await cache.set(model, text, batch_data.lower, result)
-                    return idx, result
-
-                tasks = [process_one(idx, text) for idx, text in texts_to_process]
-                completed = await asyncio.gather(*tasks, return_exceptions=True)
-
-                for item in completed:
-                    if isinstance(item, Exception):
-                        raise item
-                    idx, result = item
+            for text, result in zip(uncached, tagged):
+                for idx in uncached[text]:
                     results[idx] = result
-        else:
-            # Fall back to sequential processing
-            tagger = await model_manager.get_or_load_model(model)
-            if not tagger:
-                raise HTTPException(status_code=503, detail=f"Model '{model}' could not be loaded")
-
-            results = []
-            for text in batch_data.texts:
-                # Check cache
-                cached = await cache.get(model, text, batch_data.lower)
-                if cached is not None:
-                    results.append(cached)
-                    cache_hits += 1
-                else:
-                    result = model_manager.process_text(model, tagger, text, batch_data.lower)
-                    await cache.set(model, text, batch_data.lower, result)
-                    results.append(result)
+            await cache.set_many(model, list(zip(uncached, tagged)), lower)
 
         processing_time = (time.time() - start_time) * 1000
 
@@ -454,7 +404,7 @@ async def get_cache_stats(_: Optional[Token] = Depends(require_auth)):
 
     **Requires**: `read` scope if authentication is enabled.
     """
-    return cache.stats
+    return await cache.get_stats()
 
 
 @router.post("/cache/clear")
