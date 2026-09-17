@@ -533,11 +533,11 @@ class ModelManager:
 
             # Load the tagger using pie_extended
             logger.info(f"☕ Loading tagger for model '{module}'...")
-            device = self.device
-            # pie_extended >= 0.1.5 quantizes to INT8 by default, but quantized RNN ops
-            # (aten::quantized_gru/lstm) only exist on CPU and crash on CUDA.
+            # pie_extended >= 0.1.5 enables both options by default; keep the 0.1.3 (float, uncached) behaviour:
+            # - quantize: INT8 RNN ops (aten::quantized_gru) crash on CUDA and alter annotations on CPU
+            # - cache: PaPie 0.6.0's char-embedding LRU raises KeyError once full and holds tensors in VRAM
             tagger = get_tagger(
-                module, batch_size=self.batch_size, device=device, model_path=None, quantize=(device == "cpu")
+                module, batch_size=self.batch_size, device=self.device, model_path=None, quantize=False, cache=False
             )
 
             if not tagger:

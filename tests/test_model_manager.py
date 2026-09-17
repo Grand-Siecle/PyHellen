@@ -603,9 +603,10 @@ class TestModelManagerDeviceAndBatchSize:
         assert device in ["cpu", "cuda"]
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("device, expected_quantize", [("cuda", False), ("cpu", True)])
-    async def test_load_model_quantizes_only_on_cpu(self, mock_model_manager, device, expected_quantize):
-        """INT8 dynamic quantization has no CUDA kernels (aten::quantized_gru), so it must be off on GPU."""
+    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    async def test_load_model_disables_pie_quantization_and_cache(self, mock_model_manager, device):
+        """pie-extended 0.1.5 enables both by default: INT8 quantization crashes on CUDA and alters
+        annotations on CPU, and PaPie 0.6.0's char-embedding LRU cache raises KeyError once full."""
         with patch("app.core.model_manager.get_device", return_value=device), \
                 patch.object(mock_model_manager, "_is_model_available", return_value=Mock()), \
                 patch.object(mock_model_manager, "_check_model_files_exist", return_value=True), \
@@ -613,7 +614,8 @@ class TestModelManagerDeviceAndBatchSize:
             await mock_model_manager.get_or_load_model("lasla")
 
         assert mock_get_tagger.call_args.kwargs["device"] == device
-        assert mock_get_tagger.call_args.kwargs["quantize"] is expected_quantize
+        assert mock_get_tagger.call_args.kwargs["quantize"] is False
+        assert mock_get_tagger.call_args.kwargs["cache"] is False
 
     @pytest.mark.asyncio
     async def test_concurrent_first_requests_load_tagger_once(self, mock_model_manager):
