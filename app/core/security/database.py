@@ -11,6 +11,7 @@ from contextlib import contextmanager
 
 from app.core.security.models import Token, TokenScope
 from app.core.logger import logger
+from app.core.timeutils import ensure_utc, utcnow
 
 
 class TokenDatabase:
@@ -86,7 +87,7 @@ class TokenDatabase:
         plain_token = self._generate_token()
         token_hash = self._hash_token(plain_token, secret_key)
 
-        now = datetime.utcnow()
+        now = utcnow()
         expires_at = None
         if expires_days:
             expires_at = now + timedelta(days=expires_days)
@@ -142,13 +143,13 @@ class TokenDatabase:
             # Check expiration
             expires_at = None
             if row["expires_at"]:
-                expires_at = datetime.fromisoformat(row["expires_at"])
-                if expires_at < datetime.utcnow():
+                expires_at = ensure_utc(datetime.fromisoformat(row["expires_at"]))
+                if expires_at < utcnow():
                     logger.warning(f"Token '{row['name']}' has expired")
                     return None
 
             # Update last_used_at
-            now = datetime.utcnow()
+            now = utcnow()
             conn.execute("UPDATE tokens SET last_used_at = ? WHERE id = ?", (now.isoformat(), row["id"]))
 
             scopes = [TokenScope(s) for s in json.loads(row["scopes"])]
@@ -158,7 +159,7 @@ class TokenDatabase:
                 name=row["name"],
                 token_hash=row["token_hash"][:16] + "...",
                 scopes=scopes,
-                created_at=datetime.fromisoformat(row["created_at"]),
+                created_at=ensure_utc(datetime.fromisoformat(row["created_at"])),
                 expires_at=expires_at,
                 last_used_at=now,
                 is_active=bool(row["is_active"]),
@@ -177,8 +178,8 @@ class TokenDatabase:
 
             tokens = []
             for row in rows:
-                expires_at = datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None
-                last_used = datetime.fromisoformat(row["last_used_at"]) if row["last_used_at"] else None
+                expires_at = ensure_utc(datetime.fromisoformat(row["expires_at"])) if row["expires_at"] else None
+                last_used = ensure_utc(datetime.fromisoformat(row["last_used_at"])) if row["last_used_at"] else None
                 scopes = [TokenScope(s) for s in json.loads(row["scopes"])]
 
                 tokens.append(
@@ -187,7 +188,7 @@ class TokenDatabase:
                         name=row["name"],
                         token_hash=row["token_hash"][:16] + "...",
                         scopes=scopes,
-                        created_at=datetime.fromisoformat(row["created_at"]),
+                        created_at=ensure_utc(datetime.fromisoformat(row["created_at"])),
                         expires_at=expires_at,
                         last_used_at=last_used,
                         is_active=bool(row["is_active"]),
@@ -216,7 +217,7 @@ class TokenDatabase:
 
     def cleanup_expired(self) -> int:
         """Remove expired tokens. Returns count of removed tokens."""
-        now = datetime.utcnow().isoformat()
+        now = utcnow().isoformat()
         with self._get_connection() as conn:
             cursor = conn.execute("DELETE FROM tokens WHERE expires_at IS NOT NULL AND expires_at < ?", (now,))
             count = cursor.rowcount
@@ -231,7 +232,7 @@ class TokenDatabase:
             active = conn.execute("SELECT COUNT(*) FROM tokens WHERE is_active = 1").fetchone()[0]
             expired = conn.execute(
                 "SELECT COUNT(*) FROM tokens WHERE expires_at IS NOT NULL AND expires_at < ?",
-                (datetime.utcnow().isoformat(),),
+                (utcnow().isoformat(),),
             ).fetchone()[0]
 
             return {"total": total, "active": active, "inactive": total - active, "expired": expired}

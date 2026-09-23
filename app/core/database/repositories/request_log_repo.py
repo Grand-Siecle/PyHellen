@@ -1,6 +1,6 @@
 """Repository for request logging using SQLModel."""
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlmodel import select, func, col
@@ -8,6 +8,7 @@ from sqlmodel import select, func, col
 from app.core.database.models import Model, RequestLog
 from app.core.database.repositories.base import BaseRepository
 from app.core.logger import logger
+from app.core.timeutils import utcnow
 
 
 class RequestLogRepository(BaseRepository):
@@ -132,7 +133,7 @@ class RequestLogRepository(BaseRepository):
 
     def get_statistics(self, hours: int = 24) -> Dict[str, Any]:
         """Get request statistics for the last N hours."""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = utcnow() - timedelta(hours=hours)
 
         session = self._get_session()
         try:
@@ -203,7 +204,7 @@ class RequestLogRepository(BaseRepository):
 
     def get_model_statistics(self, model_code: str, hours: int = 24) -> Dict[str, Any]:
         """Get statistics for a specific model."""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = utcnow() - timedelta(hours=hours)
 
         session = self._get_session()
         try:
@@ -253,7 +254,7 @@ class RequestLogRepository(BaseRepository):
 
         Returns number of deleted entries.
         """
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = utcnow() - timedelta(days=days)
 
         session = self._get_session()
         try:

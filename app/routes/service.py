@@ -8,7 +8,6 @@ Kubernetes-compatible probes:
 - /service/metrics - Prometheus metrics
 """
 
-from datetime import datetime
 from typing import Dict, Any
 from fastapi import APIRouter, Request, Response
 
@@ -25,6 +24,7 @@ from app.schemas.services import (
 from app.core.utils import check_gpu_availability, get_device, get_n_workers
 from app.core.settings import Settings
 from app.core.database import ModelRepository
+from app.core.timeutils import utcnow
 
 
 router = APIRouter()
@@ -45,7 +45,7 @@ async def liveness_probe():
 
     Returns 200 if alive, container will be restarted if this fails.
     """
-    return LivenessResponse(status="alive", timestamp=datetime.now())
+    return LivenessResponse(status="alive", timestamp=utcnow())
 
 
 @router.get("/ready", response_model=ReadinessResponse)
@@ -96,7 +96,7 @@ async def readiness_probe(request: Request):
 
     response = ReadinessResponse(
         status="ready" if is_ready else "not_ready",
-        timestamp=datetime.now(),
+        timestamp=utcnow(),
         checks=checks,
         details=details if details else None,
     )
@@ -122,7 +122,7 @@ async def health_check():
         service_name=settings.title_app,
         version=settings.version,
         status="healthy",
-        timestamp=datetime.now(),
+        timestamp=utcnow(),
         details={"gpu_available": check_gpu_availability()[0]},
     )
 

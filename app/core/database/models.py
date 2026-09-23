@@ -9,6 +9,8 @@ from datetime import datetime
 from typing import List, Optional
 from sqlmodel import SQLModel, Field, Relationship
 
+from app.core.timeutils import utcnow
+
 
 # ==================
 # Model Management
@@ -34,8 +36,8 @@ class Model(ModelBase, table=True):
     __tablename__ = "models"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
     # Relationships
     files: List["ModelFile"] = Relationship(back_populates="model", cascade_delete=True)
@@ -121,7 +123,7 @@ class ModelMetrics(SQLModel, table=True):
     download_size_bytes: int = Field(default=0)
 
     error_count: int = Field(default=0)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
     # Relationship
     model: Optional[Model] = Relationship(back_populates="metrics")
@@ -151,7 +153,7 @@ class CacheEntry(SQLModel, table=True):
     text_hash: str
     text_preview: Optional[str] = None
     result_json: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
     expires_at: datetime = Field(index=True)
     hit_count: int = Field(default=0)
     last_hit_at: Optional[datetime] = None
@@ -175,7 +177,7 @@ class Token(SQLModel, table=True):
     name: str
     token_hash: str = Field(unique=True, index=True)
     scopes: str  # Comma-separated list of scopes
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
     expires_at: Optional[datetime] = None
     last_used_at: Optional[datetime] = None
     is_active: bool = Field(default=True, index=True)
@@ -200,7 +202,7 @@ class RequestLog(SQLModel, table=True):
     __tablename__ = "request_log"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
+    timestamp: datetime = Field(default_factory=utcnow, index=True)
     model_id: Optional[int] = Field(default=None, foreign_key="models.id")
     endpoint: str
     method: str
@@ -225,7 +227,7 @@ class AuditLog(SQLModel, table=True):
     __tablename__ = "audit_log"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    timestamp: datetime = Field(default_factory=datetime.utcnow, index=True)
+    timestamp: datetime = Field(default_factory=utcnow, index=True)
     action: str = Field(index=True)
     actor_token_id: Optional[int] = Field(default=None, foreign_key="tokens.id")
     target_type: Optional[str] = None
@@ -247,7 +249,7 @@ class AppState(SQLModel, table=True):
 
     key: str = Field(primary_key=True)
     value_json: str
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 # ==================
@@ -261,5 +263,5 @@ class SchemaMigration(SQLModel, table=True):
     __tablename__ = "schema_migrations"
 
     version: int = Field(primary_key=True)
-    applied_at: datetime = Field(default_factory=datetime.utcnow)
+    applied_at: datetime = Field(default_factory=utcnow)
     description: Optional[str] = None

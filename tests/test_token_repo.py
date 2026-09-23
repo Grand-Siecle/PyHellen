@@ -3,10 +3,11 @@ Tests for TokenRepository - advanced token operations.
 """
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import timedelta
 from unittest.mock import Mock, patch, MagicMock
 
 from app.core.database.repositories.token_repo import TokenRepository, TokenScope
+from app.core.timeutils import utcnow
 
 
 class TestTokenRepositoryBasics:
@@ -163,7 +164,7 @@ class TestTokenRepositoryValidate:
 
             # Create an expired token
             expired_token = Mock()
-            expired_token.expires_at = datetime.utcnow() - timedelta(days=1)
+            expired_token.expires_at = utcnow() - timedelta(days=1)
             expired_token.name = "expired"
             mock_session.exec.return_value.first.return_value = expired_token
 
@@ -180,7 +181,7 @@ class TestTokenRepositoryValidate:
             mock_get_session.return_value = mock_session
 
             valid_token = Mock()
-            valid_token.expires_at = datetime.utcnow() + timedelta(days=30)
+            valid_token.expires_at = utcnow() + timedelta(days=30)
             valid_token.last_used_at = None
             valid_token.token_hash = "a" * 64
             mock_session.exec.return_value.first.return_value = valid_token

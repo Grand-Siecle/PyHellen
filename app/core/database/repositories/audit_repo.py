@@ -9,6 +9,7 @@ from sqlmodel import select, func, col
 from app.core.database.models import AuditLog
 from app.core.database.repositories.base import BaseRepository
 from app.core.logger import logger
+from app.core.timeutils import utcnow
 
 
 class AuditAction:
@@ -177,7 +178,7 @@ class AuditRepository(BaseRepository):
 
     def get_auth_failures(self, hours: int = 24, limit: int = 100) -> List[AuditLog]:
         """Get authentication failures in the last N hours."""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = utcnow() - timedelta(hours=hours)
 
         session = self._get_session()
         try:
@@ -194,7 +195,7 @@ class AuditRepository(BaseRepository):
 
     def get_statistics(self, hours: int = 24) -> Dict[str, Any]:
         """Get audit statistics for the last N hours."""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = utcnow() - timedelta(hours=hours)
 
         session = self._get_session()
         try:
@@ -243,7 +244,7 @@ class AuditRepository(BaseRepository):
 
         Returns number of deleted entries.
         """
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = utcnow() - timedelta(days=days)
 
         session = self._get_session()
         try:

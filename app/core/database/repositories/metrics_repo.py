@@ -1,6 +1,5 @@
 """Repository for model metrics using SQLModel."""
 
-from datetime import datetime
 from typing import Any, Dict, Optional
 
 from sqlmodel import Session, select, func
@@ -8,6 +7,7 @@ from sqlmodel import Session, select, func
 from app.core.database.models import Model, ModelMetrics
 from app.core.database.repositories.base import BaseRepository
 from app.core.logger import logger
+from app.core.timeutils import utcnow
 
 
 class MetricsRepository(BaseRepository):
@@ -77,9 +77,9 @@ class MetricsRepository(BaseRepository):
 
             metrics.load_count += 1
             metrics.load_time_total_ms += load_time_ms
-            metrics.last_loaded_at = datetime.utcnow()
-            metrics.last_used_at = datetime.utcnow()
-            metrics.updated_at = datetime.utcnow()
+            metrics.last_loaded_at = utcnow()
+            metrics.last_used_at = utcnow()
+            metrics.updated_at = utcnow()
 
             session.add(metrics)
             session.commit()
@@ -97,8 +97,8 @@ class MetricsRepository(BaseRepository):
 
             metrics.process_count += 1
             metrics.process_time_total_ms += process_time_ms
-            metrics.last_used_at = datetime.utcnow()
-            metrics.updated_at = datetime.utcnow()
+            metrics.last_used_at = utcnow()
+            metrics.updated_at = utcnow()
 
             session.add(metrics)
             session.commit()
@@ -117,7 +117,7 @@ class MetricsRepository(BaseRepository):
             metrics.download_count += 1
             metrics.download_time_total_ms += download_time_ms
             metrics.download_size_bytes += download_bytes
-            metrics.updated_at = datetime.utcnow()
+            metrics.updated_at = utcnow()
 
             session.add(metrics)
             session.commit()
@@ -134,7 +134,7 @@ class MetricsRepository(BaseRepository):
                 return False
 
             metrics.error_count += 1
-            metrics.updated_at = datetime.utcnow()
+            metrics.updated_at = utcnow()
 
             session.add(metrics)
             session.commit()
@@ -150,8 +150,8 @@ class MetricsRepository(BaseRepository):
             if not metrics:
                 return False
 
-            metrics.last_used_at = datetime.utcnow()
-            metrics.updated_at = datetime.utcnow()
+            metrics.last_used_at = utcnow()
+            metrics.updated_at = utcnow()
 
             session.add(metrics)
             session.commit()
