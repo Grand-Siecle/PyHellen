@@ -19,6 +19,7 @@ class TestSettingsValidation:
         assert settings.auth_enabled is False
         assert settings.batch_size == 256
         assert settings.enable_metrics is True
+        assert settings.quantize_cpu is False
 
     def test_version_semantic_validation_valid(self):
         """Test that valid semantic versions are accepted."""
@@ -206,3 +207,92 @@ class TestSettingsTypes:
 
         settings = Settings()
         assert isinstance(settings.preload_models, list)
+
+
+class TestCacheSettings:
+    """Result cache configuration (all previously hard-coded in app/core/cache.py)."""
+
+    def test_cache_defaults(self):
+        from app.core.settings import Settings
+
+        settings = Settings()
+        assert settings.cache_enabled is True
+        assert settings.cache_persist is True
+        assert settings.cache_ttl_seconds == 7 * 24 * 3600
+        assert settings.cache_memory_max_entries == 1000
+        assert settings.cache_memory_max_bytes == 256 * 1024 * 1024
+        assert settings.cache_db_max_entries == 20000
+        assert settings.cache_db_max_bytes == 1024 * 1024 * 1024
+        assert settings.cache_max_entry_bytes == 1024 * 1024
+        assert settings.cache_cleanup_interval_seconds == 3600
+        assert settings.cache_store_text_preview is True
+        assert settings.char_cache_cpu_size == 10000
+
+    def test_cache_settings_from_environment(self, monkeypatch):
+        from app.core.settings import Settings
+
+        monkeypatch.setenv("CACHE_ENABLED", "false")
+        monkeypatch.setenv("CACHE_TTL_SECONDS", "60")
+        monkeypatch.setenv("CACHE_CLEANUP_INTERVAL_SECONDS", "0")
+
+        settings = Settings()
+        assert settings.cache_enabled is False
+        assert settings.cache_ttl_seconds == 60
+        assert settings.cache_cleanup_interval_seconds == 0
+
+    @pytest.mark.parametrize(
+        "field", ["cache_ttl_seconds", "cache_memory_max_entries", "cache_db_max_entries", "cache_max_entry_bytes"]
+    )
+    def test_cache_limits_must_be_positive(self, field):
+        from app.core.settings import Settings
+
+        with pytest.raises(ValidationError):
+            Settings(**{field: 0})
+
+    def test_cache_from_settings(self):
+        from app.core.cache import HybridCache
+        from app.core.settings import Settings
+
+        settings = Settings(cache_enabled=False, cache_ttl_seconds=60, cache_memory_max_entries=5, cache_persist=False)
+        cache = HybridCache.from_settings(settings)
+
+        stats = cache.stats
+        assert stats["enabled"] is False
+        assert stats["ttl_seconds"] == 60
+        assert stats["max_size"] == 5
+        assert stats["persistence_enabled"] is False
+
+
+class TestSettingsEnvironmentParsing:
+    """List settings are documented as comma-separated strings in .env and environment variables."""
+
+    def test_env_template_loads(self, tmp_path):
+        """`cp edit_dot_env .env` is the documented setup and must not crash at startup."""
+        from pathlib import Path
+        from app.core.settings import Settings
+
+        env_file = tmp_path / ".env"
+        env_file.write_text((Path(__file__).parent.parent / "edit_dot_env").read_text())
+
+        settings = Settings(_env_file=env_file)
+
+        assert settings.cors_origins == ["*"]
+        assert settings.preload_models == []
+
+    def test_comma_separated_lists_from_environment(self, monkeypatch):
+        from app.core.settings import Settings
+
+        monkeypatch.setenv("CORS_ORIGINS", "https://a.example, https://b.example")
+        monkeypatch.setenv("PRELOAD_MODELS", "lasla,grc")
+
+        settings = Settings()
+
+        assert settings.cors_origins == ["https://a.example", "https://b.example"]
+        assert settings.preload_models == ["lasla", "grc"]
+
+    def test_empty_preload_models_from_environment(self, monkeypatch):
+        from app.core.settings import Settings
+
+        monkeypatch.setenv("PRELOAD_MODELS", "")
+
+        assert Settings().preload_models == []

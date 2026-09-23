@@ -64,8 +64,32 @@ CORS_ALLOW_CREDENTIALS=true
 |----------|-------------|---------|
 | `MAX_CONCURRENT_PROCESSING` | Max concurrent text processing tasks | `10` |
 | `BATCH_SIZE` | Batch size for model processing | `256` |
+| `CHAR_CACHE_CPU_SIZE` | PaPie char-embedding cache entries per sub-model on CPU (~2.5x faster, identical annotations, ~30 KB RAM per entry). `0` disables. Not used on GPU (slower there) | `10000` |
+| `QUANTIZE_CPU` | INT8-quantize models on CPU (~35% faster, annotations may differ slightly from float models). Ignored on GPU. Enabled in the CPU Docker image | `false` |
 | `DOWNLOAD_TIMEOUT_SECONDS` | Model download timeout | `300` |
 | `DOWNLOAD_MAX_RETRIES` | Download retry attempts | `3` |
+
+### Result Cache
+
+Tagging results are cached in memory and persisted in the SQLite database (`TOKEN_DB_PATH`).
+Cache keys include a fingerprint of the pie-extended, PaPie and model versions, the device and
+the effective quantization, so upgrading a model or toggling `QUANTIZE_CPU` never serves stale
+annotations. With `lower=true`, the key uses the lowercased text (what is actually tagged).
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CACHE_ENABLED` | Cache tagging results | `true` |
+| `CACHE_PERSIST` | Persist results to SQLite (survive restarts) | `true` |
+| `CACHE_TTL_SECONDS` | Lifetime of a cached result | `604800` (7 days) |
+| `CACHE_MEMORY_MAX_ENTRIES` | Max results kept in memory | `1000` |
+| `CACHE_MEMORY_MAX_BYTES` | Max JSON size of results kept in memory | `268435456` (256 MiB) |
+| `CACHE_DB_MAX_ENTRIES` | Max results kept in SQLite | `20000` |
+| `CACHE_DB_MAX_BYTES` | Max JSON size kept in SQLite | `1073741824` (1 GiB) |
+| `CACHE_MAX_ENTRY_BYTES` | Results larger than this are not cached | `1048576` (1 MiB) |
+| `CACHE_CLEANUP_INTERVAL_SECONDS` | Periodic purge of expired entries (`0` disables) | `3600` |
+| `CACHE_STORE_TEXT_PREVIEW` | Store the first 100 characters of texts in SQLite | `true` |
+
+When SQLite limits are exceeded, expired entries are removed first, then the least recently used ones.
 
 ### Metrics & Logging
 

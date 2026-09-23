@@ -49,12 +49,13 @@ ENV PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
     PIE_EXTENDED_DOWNLOADS=/data/models \
     USE_CUDA=0 \
+    QUANTIZE_CPU=true \
     DOCKER_CONTAINER=true \
     LOG_FORMAT=json \
     LOG_LEVEL=INFO
 
 # Create model directory
-RUN mkdir -p /data/models
+RUN mkdir -p /data/models /data/db
 
 # Copy application code
 COPY app/ ./app/

@@ -12,9 +12,12 @@ import time
 
 import httpx
 from pie_extended.cli.utils import get_model, get_tagger
+from pie_extended.pipeline.iterators.proto import DataIterator
+from pie_extended.pipeline.postprocessor.proto import ProcessorPrototype
 from fastapi import HTTPException
 
-from app.core.utils import get_path_models, get_device, get_n_workers
+from app.core.utils import get_path_models, get_device, get_n_workers, quantization_enabled
+from app.core.papie_cache import enable_char_embedding_cache, iter_char_embeddings
 from app.core.logger import logger
 from app.core.settings import settings
 from app.schemas.nlp import ModelStatusSchema
@@ -121,6 +124,7 @@ class ModelManager:
         self.iterator_processors: Dict[str, Callable[[], Tuple]] = {}
         self.download_locks: Dict[str, asyncio.Lock] = {}
         self.is_downloading: Dict[str, bool] = {}
+        self._load_locks: Dict[str, asyncio.Lock] = {}
         self.models: Dict[str, Any] = {}  # For backwards compatibility
         self._model_inference_locks: Dict[str, threading.Lock] = {}
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=get_n_workers())
@@ -494,6 +498,14 @@ class ModelManager:
                     self._metrics.get_model_metrics(module).last_used_at = datetime.now()
             return self.taggers[module]
 
+        # Serialize loading per model so concurrent first requests share one tagger instead of each loading a copy
+        async with self._load_locks.setdefault(module, asyncio.Lock()):
+            if self.taggers.get(module):
+                return self.taggers[module]
+            return await self._load_model(module)
+
+    async def _load_model(self, module: str) -> object:
+        """Download (if needed) and load a tagger. Callers must hold the model's load lock."""
         # Wait if currently downloading
         if self.is_downloading.get(module, False):
             logger.warning(f"⏳ Model '{module}' is currently being downloaded...")
@@ -522,10 +534,26 @@ class ModelManager:
 
             # Load the tagger using pie_extended
             logger.info(f"☕ Loading tagger for model '{module}'...")
-            tagger = get_tagger(module, batch_size=self.batch_size, device=self.device, model_path=None)
+            device = self.device
+            # pie_extended >= 0.1.5 enables both options by default:
+            # - quantize: INT8 RNN ops (aten::quantized_gru) only exist on CPU and crash on CUDA; opt-in on CPU
+            #   because it slightly alters annotations compared to float models
+            # - cache: PaPie 0.6.0's char-embedding LRU raises KeyError once full; enabled below on CPU only,
+            #   with a fixed eviction (app/core/papie_cache.py)
+            tagger = get_tagger(
+                module,
+                batch_size=self.batch_size,
+                device=device,
+                model_path=None,
+                quantize=quantization_enabled(device),
+                cache=False,
+            )
 
             if not tagger:
                 raise RuntimeError(f"Failed to load tagger for model '{module}'")
+
+            if device == "cpu" and settings.char_cache_cpu_size > 0:
+                enable_char_embedding_cache(iter_char_embeddings(tagger), max_entries=settings.char_cache_cpu_size)
 
             # Try to import the iterator and processor
             try:
@@ -585,17 +613,13 @@ class ModelManager:
 
             with lock:
                 # Get the appropriate iterator and processor if available
-                if model_name in self.iterator_processors and self.iterator_processors[model_name]:
-                    try:
-                        iterator, processor = self.iterator_processors[model_name]()
-                        result = tagger.tag_str(text, iterator=iterator, processor=processor)
-                    except Exception as e:
-                        logger.error(f"❌ Error using custom iterator/processor for '{model_name}': {e}")
-                        # Fall back to default tagging if custom iterator/processor fails
-                        result = tagger.tag(text)
+                get_iterator_and_processor = self.iterator_processors.get(model_name)
+                if get_iterator_and_processor:
+                    iterator, processor = get_iterator_and_processor()
                 else:
-                    # Use default tagging method if no custom iterator/processor is available
-                    result = tagger.tag(text)
+                    # Generic pipeline: pie's Tagger.tag() expects pre-tokenized sentences, not raw text
+                    iterator, processor = DataIterator(), ProcessorPrototype()
+                result = tagger.tag_str(text, iterator=iterator, processor=processor)
 
             # Update metrics (thread-safe)
             process_time = (time.time() - start_time) * 1000
@@ -651,16 +675,8 @@ class ModelManager:
         if not tagger:
             raise HTTPException(status_code=500, detail=f"Failed to load tagger for '{model_name}'")
 
-        results = [None] * len(texts)
-        tasks_to_process = []
-
-        # Check cache first
-        for idx, text in enumerate(texts):
-            cached = await cache.get(model_name, text, lower)
-            if cached is not None:
-                results[idx] = cached
-            else:
-                tasks_to_process.append((idx, text))
+        results = await cache.get_many(model_name, texts, lower)
+        tasks_to_process = [(idx, text) for idx, text in enumerate(texts) if results[idx] is None]
 
         # Process uncached texts concurrently
         if tasks_to_process:
@@ -668,9 +684,7 @@ class ModelManager:
 
             async def process_with_semaphore(idx: int, text: str):
                 async with semaphore:
-                    result = await self.process_text_async(model_name, tagger, text, lower)
-                    await cache.set(model_name, text, lower, result)
-                    return idx, result
+                    return idx, await self.process_text_async(model_name, tagger, text, lower)
 
             tasks = [process_with_semaphore(idx, text) for idx, text in tasks_to_process]
 
@@ -682,6 +696,8 @@ class ModelManager:
                     raise item
                 idx, result = item
                 results[idx] = result
+
+            await cache.set_many(model_name, [(texts[idx], results[idx]) for idx, _ in tasks_to_process], lower)
 
         return results
 

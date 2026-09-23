@@ -61,6 +61,9 @@ docker run -p 8000:8000 \
   ghcr.io/grand-siecle/pyhellen:latest
 ```
 
+The CPU image sets `QUANTIZE_CPU=true` (INT8 models, ~35% faster inference with slightly different
+annotations). Pass `-e QUANTIZE_CPU=false` to get the same float annotations as the GPU image.
+
 ### Persistent Model Storage
 
 Models are stored in `/data/models` inside the container. Mount a volume to persist:
@@ -79,9 +82,14 @@ docker run -p 8000:8000 \
   ghcr.io/grand-siecle/pyhellen:latest
 ```
 
-### Token Database
+### Database (tokens, cache, logs)
 
-For authentication, persist the token database:
+The SQLite database holds API tokens, audit/request logs, metrics and the persistent result cache.
+`docker/docker-compose.yml` stores it on the `db_data` volume (`TOKEN_DB_PATH=/data/db/tokens.db`) so it
+survives `docker compose up --build`. Without a volume, it lives in the container and is lost when the
+container is recreated.
+
+With `docker run`, persist it explicitly:
 
 ```bash
 docker run -p 8000:8000 \

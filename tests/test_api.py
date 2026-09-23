@@ -6,6 +6,8 @@ import pytest
 from fastapi import status
 from unittest.mock import patch, Mock, AsyncMock
 
+from app.core.cache import HybridCache
+
 
 class TestLanguagesEndpoint:
     """Test suite for /api/languages endpoint."""
@@ -147,9 +149,10 @@ class TestTagEndpointWithMock:
         """Test successful text tagging with mocked model."""
         mock_result = [{"form": "test", "lemma": "test", "pos": "NOUN"}]
 
-        with patch('app.routes.api.model_manager') as mock_mm:
+        with patch('app.routes.api.model_manager') as mock_mm, \
+             patch('app.routes.api.cache', HybridCache(persist=False)):
             mock_mm.get_or_load_model = AsyncMock(return_value=Mock())
-            mock_mm.process_text.return_value = mock_result
+            mock_mm.process_text_async = AsyncMock(return_value=mock_result)
 
             response = client.post(
                 "/api/tag/lasla",
@@ -167,9 +170,10 @@ class TestTagEndpointWithMock:
         """Test GET tag endpoint with mocked model."""
         mock_result = [{"form": "hello", "lemma": "hello"}]
 
-        with patch('app.routes.api.model_manager') as mock_mm:
+        with patch('app.routes.api.model_manager') as mock_mm, \
+             patch('app.routes.api.cache', HybridCache(persist=False)):
             mock_mm.get_or_load_model = AsyncMock(return_value=Mock())
-            mock_mm.process_text.return_value = mock_result
+            mock_mm.process_text_async = AsyncMock(return_value=mock_result)
 
             response = client.get("/api/tag/lasla?text=hello")
 
@@ -182,9 +186,10 @@ class TestTagEndpointWithMock:
         """Test text tagging with lowercase option."""
         mock_result = [{"form": "test", "lemma": "test"}]
 
-        with patch('app.routes.api.model_manager') as mock_mm:
+        with patch('app.routes.api.model_manager') as mock_mm, \
+             patch('app.routes.api.cache', HybridCache(persist=False)):
             mock_mm.get_or_load_model = AsyncMock(return_value=Mock())
-            mock_mm.process_text.return_value = mock_result
+            mock_mm.process_text_async = AsyncMock(return_value=mock_result)
 
             response = client.post(
                 "/api/tag/lasla",
@@ -192,17 +197,42 @@ class TestTagEndpointWithMock:
             )
 
             assert response.status_code == status.HTTP_200_OK
-            # Verify lowercase was passed to process_text
-            mock_mm.process_text.assert_called_once()
-            call_args = mock_mm.process_text.call_args
+            # Verify lowercase was passed to process_text_async
+            mock_mm.process_text_async.assert_awaited_once()
+            call_args = mock_mm.process_text_async.call_args
             assert call_args[0][3] is True  # lower argument
+
+    def test_tag_inference_runs_off_event_loop(self, client):
+        """/tag must use the executor-backed process_text_async, never the blocking process_text."""
+        with patch('app.routes.api.model_manager') as mock_mm, \
+             patch('app.routes.api.cache', HybridCache(persist=False)):
+            mock_mm.get_or_load_model = AsyncMock(return_value=Mock())
+            mock_mm.process_text_async = AsyncMock(return_value=[{"form": "x"}])
+
+            client.post("/api/tag/lasla", json={"text": "x", "lower": False})
+            client.get("/api/tag/lasla?text=y")
+
+            assert mock_mm.process_text_async.await_count == 2
+            mock_mm.process_text.assert_not_called()
+
+    def test_tag_second_request_is_served_from_cache(self, client):
+        with patch('app.routes.api.model_manager') as mock_mm, \
+             patch('app.routes.api.cache', HybridCache(persist=False)):
+            mock_mm.get_or_load_model = AsyncMock(return_value=Mock())
+            mock_mm.process_text_async = AsyncMock(return_value=[{"form": "x"}])
+
+            first = client.post("/api/tag/lasla", json={"text": "x", "lower": False}).json()
+            second = client.post("/api/tag/lasla", json={"text": "x", "lower": False}).json()
+
+            assert (first["from_cache"], second["from_cache"]) == (False, True)
+            assert mock_mm.process_text_async.await_count == 1
 
     def test_tag_returns_cached_result(self, client):
         """Test that cached results are returned."""
         cached_result = [{"form": "cached", "lemma": "cached"}]
 
         with patch('app.routes.api.cache') as mock_cache:
-            mock_cache.get = AsyncMock(return_value=cached_result)
+            mock_cache.get_or_compute = AsyncMock(return_value=(cached_result, True))
 
             response = client.post(
                 "/api/tag/lasla",
@@ -226,11 +256,9 @@ class TestBatchEndpointWithMock:
         ]
 
         with patch('app.routes.api.model_manager') as mock_mm, \
-             patch('app.routes.api.cache') as mock_cache:
+             patch('app.routes.api.cache', HybridCache(persist=False)):
             mock_mm.get_or_load_model = AsyncMock(return_value=Mock())
             mock_mm.process_text_async = AsyncMock(side_effect=mock_results)
-            mock_cache.get = AsyncMock(return_value=None)
-            mock_cache.set = AsyncMock()
 
             response = client.post(
                 "/api/batch/lasla",
@@ -248,11 +276,9 @@ class TestBatchEndpointWithMock:
         mock_result = [{"form": "test", "lemma": "test"}]
 
         with patch('app.routes.api.model_manager') as mock_mm, \
-             patch('app.routes.api.cache') as mock_cache:
+             patch('app.routes.api.cache', HybridCache(persist=False)):
             mock_mm.get_or_load_model = AsyncMock(return_value=Mock())
-            mock_mm.process_text.return_value = mock_result
-            mock_cache.get = AsyncMock(return_value=None)
-            mock_cache.set = AsyncMock()
+            mock_mm.process_text_async = AsyncMock(return_value=mock_result)
 
             response = client.post(
                 "/api/batch/lasla?concurrent=false",
@@ -260,6 +286,26 @@ class TestBatchEndpointWithMock:
             )
 
             assert response.status_code == status.HTTP_200_OK
+            mock_mm.process_text.assert_not_called()
+
+    @pytest.mark.parametrize("concurrent", ["false", "true"])
+    def test_batch_uses_cache_and_tags_duplicates_once(self, client, concurrent):
+        texts = ["a", "b", "a", "c"]
+        cache = HybridCache(persist=False)
+
+        with patch('app.routes.api.model_manager') as mock_mm, \
+             patch('app.routes.api.cache', cache):
+            mock_mm.get_or_load_model = AsyncMock(return_value=Mock())
+            mock_mm.process_text_async = AsyncMock(side_effect=lambda model, tagger, text, lower: [{"form": text}])
+
+            first = client.post(f"/api/batch/lasla?concurrent={concurrent}", json={"texts": texts, "lower": False})
+            second = client.post(f"/api/batch/lasla?concurrent={concurrent}", json={"texts": texts, "lower": False})
+
+            assert first.json()["results"] == [[{"form": t}] for t in texts]
+            assert first.json()["cache_hits"] == 0
+            assert mock_mm.process_text_async.await_count == 3  # "a" tagged once
+            assert second.json()["results"] == first.json()["results"]
+            assert second.json()["cache_hits"] == 4
 
 
 class TestStreamEndpointWithMock:
@@ -457,8 +503,7 @@ class TestErrorHandling:
     def test_model_not_available_returns_404(self, client):
         """Test that unavailable model returns 404."""
         with patch('app.routes.api.model_manager') as mock_mm, \
-             patch('app.routes.api.cache') as mock_cache:
-            mock_cache.get = AsyncMock(return_value=None)
+             patch('app.routes.api.cache', HybridCache(persist=False)):
             mock_mm.get_or_load_model = AsyncMock(
                 side_effect=RuntimeError("Model 'lasla' not available")
             )
@@ -473,8 +518,7 @@ class TestErrorHandling:
     def test_model_load_failure_returns_503(self, client):
         """Test that model load failure returns 503."""
         with patch('app.routes.api.model_manager') as mock_mm, \
-             patch('app.routes.api.cache') as mock_cache:
-            mock_cache.get = AsyncMock(return_value=None)
+             patch('app.routes.api.cache', HybridCache(persist=False)):
             mock_mm.get_or_load_model = AsyncMock(
                 side_effect=RuntimeError("Failed to load model 'lasla'")
             )
@@ -489,10 +533,9 @@ class TestErrorHandling:
     def test_processing_error_returns_400(self, client):
         """Test that processing errors return 400."""
         with patch('app.routes.api.model_manager') as mock_mm, \
-             patch('app.routes.api.cache') as mock_cache:
+             patch('app.routes.api.cache', HybridCache(persist=False)):
             mock_mm.get_or_load_model = AsyncMock(return_value=Mock())
-            mock_mm.process_text.side_effect = ValueError("Invalid input")
-            mock_cache.get = AsyncMock(return_value=None)
+            mock_mm.process_text_async = AsyncMock(side_effect=ValueError("Invalid input"))
 
             response = client.post(
                 "/api/tag/lasla",
@@ -500,6 +543,23 @@ class TestErrorHandling:
             )
 
             assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_backend_runtime_error_returns_500(self, client):
+        """Torch/CUDA failures (NotImplementedError, OOM...) are RuntimeError subclasses but server-side faults."""
+        with patch('app.routes.api.model_manager') as mock_mm, \
+             patch('app.routes.api.cache', HybridCache(persist=False)):
+            mock_mm.get_or_load_model = AsyncMock(return_value=Mock())
+            mock_mm.process_text_async = AsyncMock(side_effect=NotImplementedError(
+                "Could not run 'aten::quantized_gru.data' with arguments from the 'CUDA' backend."
+            ))
+
+            response = client.post(
+                "/api/tag/lasla",
+                json={"text": "test", "lower": False}
+            )
+
+            assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert "quantized_gru" not in response.text
 
 
 class TestCacheEndpointDetails:
@@ -580,3 +640,30 @@ class TestModelsEndpointDetails:
             data = response.json()
             # Check for expected fields
             assert "name" in data or "status" in data
+
+
+class TestCacheLifecycle:
+    """The application owns a periodic cleanup task for expired cache entries."""
+
+    def test_cleanup_task_started_and_stopped_with_app(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        with patch("app.main.settings.cache_cleanup_interval_seconds", 3600):
+            with TestClient(app):
+                task = app.state.cache_cleanup_task
+                assert task is not None and not task.done()
+            assert task.cancelled() or task.done()
+
+    def test_cleanup_task_disabled_with_zero_interval(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        with patch("app.main.settings.cache_cleanup_interval_seconds", 0):
+            with TestClient(app):
+                assert app.state.cache_cleanup_task is None
+
+    def test_cache_stats_endpoint_includes_database(self, client):
+        response = client.get("/api/cache/stats")
+        assert response.status_code == status.HTTP_200_OK
+        assert "database" in response.json()

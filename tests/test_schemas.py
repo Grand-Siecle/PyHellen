@@ -23,7 +23,7 @@ class TestPieLanguage:
 
     def test_all_languages_defined(self):
         """Test that all expected languages are defined."""
-        expected = ["lasla", "grc", "fro", "freem", "fr", "dum", "occ_cont"]
+        expected = ["lasla", "grc", "fro", "freem", "fr", "dum", "occ_cont", "frm"]
         actual = [lang.name for lang in PieLanguage]
         assert sorted(actual) == sorted(expected)
 

@@ -2,9 +2,15 @@
 Tests for the ModelManager class.
 """
 
+import asyncio
+
 import pytest
 from datetime import datetime
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock, patch, AsyncMock, create_autospec
+
+from pie_extended.pipeline.iterators.proto import DataIterator
+from pie_extended.pipeline.postprocessor.proto import ProcessorPrototype
+from pie_extended.tagger import ExtensibleTagger
 
 from app.core.model_manager import ModelManager, ModelMetrics, GlobalMetrics
 from app.schemas.nlp import PieLanguage
@@ -100,7 +106,7 @@ class TestProcessText:
     def test_process_text_with_lower(self, mock_model_manager):
         """Test processing text with lowercase option."""
         mock_tagger = Mock()
-        mock_tagger.tag.return_value = [{"form": "test", "lemma": "test"}]
+        mock_tagger.tag_str.return_value = [{"form": "test", "lemma": "test"}]
 
         result = mock_model_manager.process_text(
             "model",
@@ -110,12 +116,12 @@ class TestProcessText:
         )
 
         # Should be called with lowercased text
-        mock_tagger.tag.assert_called_with("test text")
+        assert mock_tagger.tag_str.call_args.args[0] == "test text"
 
     def test_process_text_without_lower(self, mock_model_manager):
         """Test processing text without lowercase option."""
         mock_tagger = Mock()
-        mock_tagger.tag.return_value = [{"form": "TEST", "lemma": "test"}]
+        mock_tagger.tag_str.return_value = [{"form": "TEST", "lemma": "test"}]
 
         result = mock_model_manager.process_text(
             "model",
@@ -124,7 +130,7 @@ class TestProcessText:
             lower=False
         )
 
-        mock_tagger.tag.assert_called_with("TEST TEXT")
+        assert mock_tagger.tag_str.call_args.args[0] == "TEST TEXT"
 
     def test_process_text_with_custom_processor(self, mock_model_manager):
         """Test processing with custom iterator/processor."""
@@ -143,6 +149,30 @@ class TestProcessText:
         )
 
         mock_tagger.tag_str.assert_called_once()
+
+    def test_process_text_custom_processor_error_is_not_masked(self, mock_model_manager):
+        """A tagging error must propagate as-is instead of being replaced by a fallback error."""
+        mock_tagger = create_autospec(ExtensibleTagger, instance=True)
+        mock_tagger.tag_str.side_effect = NotImplementedError("Could not run 'aten::quantized_gru.data'")
+        mock_model_manager.iterator_processors["model"] = lambda: (Mock(), Mock())
+
+        with pytest.raises(NotImplementedError, match="quantized_gru"):
+            mock_model_manager.process_text("model", mock_tagger, "test text")
+
+        mock_tagger.tag.assert_not_called()
+
+    def test_process_text_without_custom_processor_uses_generic_pipeline(self, mock_model_manager):
+        """pie's Tagger.tag() expects pre-tokenized sentences, so raw text always goes through tag_str()."""
+        mock_tagger = create_autospec(ExtensibleTagger, instance=True)
+        mock_tagger.tag_str.return_value = [{"form": "test"}]
+
+        result = mock_model_manager.process_text("model", mock_tagger, "test text")
+
+        assert result == [{"form": "test"}]
+        kwargs = mock_tagger.tag_str.call_args.kwargs
+        assert isinstance(kwargs["iterator"], DataIterator)
+        assert isinstance(kwargs["processor"], ProcessorPrototype)
+        mock_tagger.tag.assert_not_called()
 
 
 class TestBatchProcessing:
@@ -166,7 +196,7 @@ class TestStreamProcessing:
     async def test_stream_process_yields_results(self, mock_model_manager):
         """Test that stream_process yields results for each text."""
         mock_tagger = Mock()
-        mock_tagger.tag.return_value = [{"form": "test"}]
+        mock_tagger.tag_str.return_value = [{"form": "test"}]
 
         with patch.object(mock_model_manager, 'get_or_load_model', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = mock_tagger
@@ -183,7 +213,7 @@ class TestStreamProcessing:
         import json
 
         mock_tagger = Mock()
-        mock_tagger.tag.return_value = [{"form": "test"}]
+        mock_tagger.tag_str.return_value = [{"form": "test"}]
 
         with patch.object(mock_model_manager, 'get_or_load_model', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = mock_tagger
@@ -207,7 +237,7 @@ class TestStreamProcessing:
     async def test_stream_process_sse_format(self, mock_model_manager):
         """Test SSE streaming format."""
         mock_tagger = Mock()
-        mock_tagger.tag.return_value = [{"form": "test"}]
+        mock_tagger.tag_str.return_value = [{"form": "test"}]
 
         with patch.object(mock_model_manager, 'get_or_load_model', new_callable=AsyncMock) as mock_load:
             mock_load.return_value = mock_tagger
@@ -343,7 +373,7 @@ class TestModelManagerMetrics:
         """Test that process_text updates metrics."""
         manager = ModelManager()
         mock_tagger = Mock()
-        mock_tagger.tag.return_value = [{"form": "test"}]
+        mock_tagger.tag_str.return_value = [{"form": "test"}]
 
         initial_count = manager._metrics.total_requests
 
@@ -515,7 +545,7 @@ class TestModelManagerErrorHandling:
     def test_process_text_increments_error_on_failure(self, mock_model_manager):
         """Test that process_text updates error metrics on failure."""
         mock_tagger = Mock()
-        mock_tagger.tag.side_effect = RuntimeError("Processing failed")
+        mock_tagger.tag_str.side_effect = RuntimeError("Processing failed")
 
         initial_errors = mock_model_manager._metrics.total_errors if mock_model_manager._metrics else 0
 
@@ -571,6 +601,67 @@ class TestModelManagerDeviceAndBatchSize:
         """Test that device returns a valid value."""
         device = mock_model_manager.device
         assert device in ["cpu", "cuda"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "device, quantize_cpu, expected_quantize",
+        [("cuda", True, False), ("cuda", False, False), ("cpu", True, True), ("cpu", False, False)],
+    )
+    async def test_load_model_quantization_and_cache(
+        self, mock_model_manager, device, quantize_cpu, expected_quantize
+    ):
+        """pie-extended 0.1.5 enables both by default: INT8 quantization crashes on CUDA (opt-in on CPU only),
+        and PaPie 0.6.0's char-embedding LRU cache raises KeyError once full (always off)."""
+        with patch("app.core.model_manager.get_device", return_value=device), \
+                patch("app.core.model_manager.settings.quantize_cpu", quantize_cpu), \
+                patch.object(mock_model_manager, "_is_model_available", return_value=Mock()), \
+                patch.object(mock_model_manager, "_check_model_files_exist", return_value=True), \
+                patch("app.core.model_manager.get_tagger", return_value=Mock(models=[])) as mock_get_tagger:
+            await mock_model_manager.get_or_load_model("lasla")
+
+        assert mock_get_tagger.call_args.kwargs["device"] == device
+        assert mock_get_tagger.call_args.kwargs["quantize"] is expected_quantize
+        assert mock_get_tagger.call_args.kwargs["cache"] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("device, size, expected", [("cpu", 5000, 5000), ("cpu", 0, None), ("cuda", 5000, None)])
+    async def test_char_embedding_cache_only_on_cpu(self, mock_model_manager, device, size, expected):
+        """PaPie's char cache speeds up CPU inference ~2.5x but slows GPU inference down."""
+        with patch("app.core.model_manager.get_device", return_value=device), \
+                patch("app.core.model_manager.settings.char_cache_cpu_size", size), \
+                patch.object(mock_model_manager, "_is_model_available", return_value=Mock()), \
+                patch.object(mock_model_manager, "_check_model_files_exist", return_value=True), \
+                patch("app.core.model_manager.get_tagger", return_value=Mock(models=[])), \
+                patch("app.core.model_manager.enable_char_embedding_cache") as enable_cache:
+            await mock_model_manager.get_or_load_model("lasla")
+
+        if expected is None:
+            enable_cache.assert_not_called()
+        else:
+            assert enable_cache.call_args.kwargs["max_entries"] == expected
+
+    @pytest.mark.asyncio
+    async def test_concurrent_first_requests_load_tagger_once(self, mock_model_manager):
+        """Requests arriving while a model downloads must share one tagger instead of each loading a copy."""
+        files_present = False
+
+        async def fake_download(module):
+            nonlocal files_present
+            mock_model_manager.is_downloading[module] = True
+            await asyncio.sleep(0.05)
+            files_present = True
+            mock_model_manager.is_downloading[module] = False
+            return True
+
+        with patch.object(mock_model_manager, "_is_model_available", return_value=Mock()), \
+                patch.object(mock_model_manager, "_check_model_files_exist", side_effect=lambda *_: files_present), \
+                patch.object(mock_model_manager, "download_model", side_effect=fake_download) as mock_download, \
+                patch("app.core.model_manager.get_tagger", side_effect=lambda *_, **__: Mock(models=[])) as mock_get_tagger:
+            taggers = await asyncio.gather(*(mock_model_manager.get_or_load_model("lasla") for _ in range(5)))
+
+        assert mock_download.call_count == 1
+        assert mock_get_tagger.call_count == 1
+        assert all(tagger is taggers[0] for tagger in taggers)
 
 
 class TestModelManagerCheckModelFiles:

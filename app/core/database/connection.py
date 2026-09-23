@@ -270,7 +270,10 @@ class DatabaseManager:
                      1, 1, 6, datetime('now'), datetime('now')),
                     ('occ_cont', 'Occitan Contemporain',
                      'Tagger for Contemporary Occitan texts', 'occ_cont',
-                     1, 1, 7, datetime('now'), datetime('now'))
+                     1, 1, 7, datetime('now'), datetime('now')),
+                    ('frm', 'Middle French',
+                     'Tagger for Middle French texts', 'frm',
+                     1, 1, 8, datetime('now'), datetime('now'))
                 """,
                 ],
             )
