@@ -11,6 +11,7 @@ from sqlmodel import Session, col, delete, func, select, update
 from app.core.database.models import Model, CacheEntry
 from app.core.database.repositories.base import BaseRepository
 from app.core.logger import logger
+from app.core.timeutils import ensure_utc, utcnow
 
 # Rows per statement, well below SQLite's bound-parameter limit
 _CHUNK_SIZE = 50
@@ -43,17 +44,12 @@ class CacheRecord:
     text_preview: Optional[str] = None
 
 
-def _utcnow() -> datetime:
-    """Naive UTC datetime, matching how timestamps are stored."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
 def _to_datetime(timestamp: float) -> datetime:
-    return datetime.fromtimestamp(timestamp, tz=timezone.utc).replace(tzinfo=None)
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc)
 
 
 def _to_timestamp(value: datetime) -> float:
-    return value.replace(tzinfo=timezone.utc).timestamp()
+    return ensure_utc(value).timestamp()
 
 
 def _chunks(items: Sequence, size: int = _CHUNK_SIZE):
@@ -93,7 +89,7 @@ class CacheRepository(BaseRepository):
         """
         if not keys:
             return {}
-        now = _utcnow()
+        now = utcnow()
         session = self._get_session()
         try:
             found: Dict[str, Tuple[str, float]] = {}
@@ -141,7 +137,7 @@ class CacheRepository(BaseRepository):
                 logger.warning(f"Cannot cache: model '{model_code}' not found")
                 return 0
 
-            now = _utcnow()
+            now = utcnow()
             rows = [
                 {
                     "cache_key": record.key,
@@ -264,7 +260,7 @@ class CacheRepository(BaseRepository):
         """Remove expired entries. Returns number of removed entries."""
         session = self._get_session()
         try:
-            count = session.exec(delete(CacheEntry).where(CacheEntry.expires_at <= _utcnow())).rowcount
+            count = session.exec(delete(CacheEntry).where(CacheEntry.expires_at <= utcnow())).rowcount
             session.commit()
             return count
         finally:

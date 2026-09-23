@@ -3,7 +3,7 @@
 import hashlib
 import json
 import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
 from enum import Enum
 from typing import List, Optional, Tuple
 
@@ -12,6 +12,7 @@ from sqlmodel import select, func
 from app.core.database.models import Token
 from app.core.database.repositories.base import BaseRepository
 from app.core.logger import logger
+from app.core.timeutils import utcnow
 
 
 class TokenScope(str, Enum):
@@ -60,7 +61,7 @@ class TokenRepository(BaseRepository):
         plain_token = self._generate_token()
         token_hash = self._hash_token(plain_token, secret_key)
 
-        now = datetime.utcnow()
+        now = utcnow()
         expires_at = None
         if expires_days:
             expires_at = now + timedelta(days=expires_days)
@@ -106,12 +107,12 @@ class TokenRepository(BaseRepository):
                 return None
 
             # Check expiration
-            if token.expires_at and token.expires_at < datetime.utcnow():
+            if token.expires_at and token.expires_at < utcnow():
                 logger.warning(f"Token '{token.name}' has expired")
                 return None
 
             # Update last_used_at
-            token.last_used_at = datetime.utcnow()
+            token.last_used_at = utcnow()
             session.add(token)
             session.commit()
             session.refresh(token)
@@ -172,7 +173,7 @@ class TokenRepository(BaseRepository):
 
     def cleanup_expired(self) -> int:
         """Remove expired tokens. Returns count of removed tokens."""
-        now = datetime.utcnow()
+        now = utcnow()
 
         session = self._get_session()
         try:
@@ -198,7 +199,7 @@ class TokenRepository(BaseRepository):
             total = session.exec(select(func.count(Token.id))).one()
             active = session.exec(select(func.count(Token.id)).where(Token.is_active == True)).one()
             expired = session.exec(
-                select(func.count(Token.id)).where(Token.expires_at.is_not(None), Token.expires_at < datetime.utcnow())
+                select(func.count(Token.id)).where(Token.expires_at.is_not(None), Token.expires_at < utcnow())
             ).one()
 
             return {"total": total, "active": active, "inactive": total - active, "expired": expired}

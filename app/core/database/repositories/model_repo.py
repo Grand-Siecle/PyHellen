@@ -1,6 +1,5 @@
 """Repository for model management using SQLModel."""
 
-from datetime import datetime
 from typing import List, Optional
 
 from sqlmodel import Session, select, func
@@ -8,6 +7,7 @@ from sqlmodel import Session, select, func
 from app.core.database.models import Model, ModelFile
 from app.core.database.engine import get_db_engine
 from app.core.logger import logger
+from app.core.timeutils import utcnow
 
 
 class ModelRepository:
@@ -142,7 +142,7 @@ class ModelRepository:
             if priority is not None:
                 model.priority = priority
 
-            model.updated_at = datetime.utcnow()
+            model.updated_at = utcnow()
             session.add(model)
             session.commit()
             session.refresh(model)
@@ -161,7 +161,7 @@ class ModelRepository:
                 return False
 
             model.is_active = True
-            model.updated_at = datetime.utcnow()
+            model.updated_at = utcnow()
             session.add(model)
             session.commit()
             logger.info(f"Activated model '{code}'")
@@ -179,7 +179,7 @@ class ModelRepository:
                 return False
 
             model.is_active = False
-            model.updated_at = datetime.utcnow()
+            model.updated_at = utcnow()
             session.add(model)
             session.commit()
             logger.info(f"Deactivated model '{code}'")
@@ -285,7 +285,7 @@ class ModelRepository:
                 return False
 
             model_file.is_downloaded = True
-            model_file.downloaded_at = datetime.utcnow()
+            model_file.downloaded_at = utcnow()
             if size_bytes is not None:
                 model_file.size_bytes = size_bytes
 

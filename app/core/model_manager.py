@@ -17,6 +17,7 @@ from pie_extended.pipeline.postprocessor.proto import ProcessorPrototype
 from fastapi import HTTPException
 
 from app.core.utils import get_path_models, get_device, get_n_workers, quantization_enabled
+from app.core.timeutils import utcnow
 from app.core.papie_cache import enable_char_embedding_cache, iter_char_embeddings
 from app.core.logger import logger
 from app.core.settings import settings
@@ -86,7 +87,7 @@ class GlobalMetrics:
     total requests, errors, and per-model metrics.
     """
 
-    started_at: datetime = field(default_factory=datetime.now)
+    started_at: datetime = field(default_factory=utcnow)
     total_requests: int = 0
     total_errors: int = 0
     models: Dict[str, ModelMetrics] = field(default_factory=dict)
@@ -99,7 +100,7 @@ class GlobalMetrics:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert all metrics to a dictionary for JSON serialization."""
-        uptime = (datetime.now() - self.started_at).total_seconds()
+        uptime = (utcnow() - self.started_at).total_seconds()
         # Calculate requests per minute, avoiding division issues with very small uptimes
         uptime_minutes = uptime / 60
         requests_per_minute = round(self.total_requests / uptime_minutes, 2) if uptime_minutes >= 0.01 else 0.0
@@ -200,7 +201,7 @@ class ModelManager:
 
         with self._metrics_thread_lock:
             metrics = self._metrics.get_model_metrics(model_name)
-            now = datetime.now()
+            now = utcnow()
 
             if load_time_ms is not None:
                 metrics.load_count += 1
@@ -495,7 +496,7 @@ class ModelManager:
                 if not hasattr(self, "_metrics_thread_lock"):
                     self._metrics_thread_lock = threading.Lock()
                 with self._metrics_thread_lock:
-                    self._metrics.get_model_metrics(module).last_used_at = datetime.now()
+                    self._metrics.get_model_metrics(module).last_used_at = utcnow()
             return self.taggers[module]
 
         # Serialize loading per model so concurrent first requests share one tagger instead of each loading a copy

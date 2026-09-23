@@ -3,11 +3,12 @@
 import pytest
 import tempfile
 import os
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from app.core.security.database import TokenDatabase
 from app.core.security.models import TokenScope, TokenCreate
 from app.core.security.auth import AuthManager
+from app.core.timeutils import utcnow
 
 
 class TestTokenDatabase:
@@ -55,7 +56,7 @@ class TestTokenDatabase:
         )
 
         assert token_obj.expires_at is not None
-        assert token_obj.expires_at > datetime.utcnow()
+        assert token_obj.expires_at > utcnow()
 
     def test_validate_token(self, db, secret_key):
         """Test token validation."""
